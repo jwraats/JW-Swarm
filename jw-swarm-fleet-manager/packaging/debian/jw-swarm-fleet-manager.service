@@ -1,6 +1,6 @@
 [Unit]
 Description=JW Swarm Fleet Manager
-Documentation=https://github.com/JWrrr/JW-Swarm
+Documentation=https://github.com/jwraats/JW-Swarm
 After=network-online.target
 Wants=network-online.target
 
