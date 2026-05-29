@@ -25,7 +25,7 @@ jobs:
       run:
         working-directory: jw-swarm-nodes/linux
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -37,7 +37,7 @@ jobs:
       - name: Build .deb
         run: cargo deb
       - name: Upload .deb artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: jw-swarm-node-deb
           path: jw-swarm-nodes/linux/target/debian/*.deb
@@ -47,7 +47,7 @@ jobs:
     name: macOS node (Swift)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Check for project
         id: check
         run: |
@@ -68,7 +68,7 @@ jobs:
           fi
       - name: Upload macOS package
         if: steps.check.outputs.present == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: jw-swarm-node-macos
           path: jw-swarm-nodes/macos/build/**/*.{dmg,pkg,app}
@@ -79,7 +79,7 @@ jobs:
     name: Windows node (.NET / WinUI 3)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Check for project
         id: check
         shell: pwsh
@@ -94,14 +94,14 @@ jobs:
         if: steps.check.outputs.present == 'true'
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "9.0.x"
       - name: Build & package (.msi)
         if: steps.check.outputs.present == 'true'
         working-directory: jw-swarm-nodes/windows
         run: dotnet build -c Release
       - name: Upload Windows package
         if: steps.check.outputs.present == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: jw-swarm-node-windows
           path: jw-swarm-nodes/windows/**/bin/Release/**/*.{msi,exe}
@@ -116,7 +116,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           path: dist
       - name: Publish GitHub Release

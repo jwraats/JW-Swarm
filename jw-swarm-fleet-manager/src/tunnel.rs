@@ -31,7 +31,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         while let Some(msg) = rx.recv().await {
             match msg.to_json() {
                 Ok(json) => {
-                    if sink.send(WsMessage::Text(json)).await.is_err() {
+                    if sink.send(WsMessage::Text(json.into())).await.is_err() {
                         break;
                     }
                 }
@@ -57,7 +57,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             WsMessage::Ping(_) | WsMessage::Pong(_) | WsMessage::Binary(_) => continue,
         };
 
-        let msg = match Message::from_json(&text) {
+        let msg = match Message::from_json(text.as_str()) {
             Ok(m) => m,
             Err(e) => {
                 warn!("invalid tunnel message: {e}");
