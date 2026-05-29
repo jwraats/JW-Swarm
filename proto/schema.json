@@ -1,0 +1,237 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://jw-swarm/proto/schema.json",
+  "title": "JW Swarm Tunnel Protocol",
+  "description": "Language-neutral source of truth for messages exchanged over the node tunnel.",
+  "type": "object",
+  "required": ["type", "payload"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "Register",
+        "CatalogRequest",
+        "CatalogResponse",
+        "Heartbeat",
+        "ModelStatus",
+        "ScheduleState",
+        "PromptDispatch",
+        "TokenChunk",
+        "Done",
+        "Error"
+      ]
+    },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "Register" } } },
+      "then": { "properties": { "payload": { "$ref": "#/definitions/Register" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "CatalogRequest" } } },
+      "then": { "properties": { "payload": { "$ref": "#/definitions/CatalogRequest" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "CatalogResponse" } } },
+      "then": { "properties": { "payload": { "$ref": "#/definitions/CatalogResponse" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "Heartbeat" } } },
+      "then": { "properties": { "payload": { "$ref": "#/definitions/Heartbeat" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ModelStatus" } } },
+      "then": { "properties": { "payload": { "$ref": "#/definitions/ModelStatus" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "ScheduleState" } } },
+      "then": { "properties": { "payload": { "$ref": "#/definitions/ScheduleState" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "PromptDispatch" } } },
+      "then": { "properties": { "payload": { "$ref": "#/definitions/PromptDispatch" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "TokenChunk" } } },
+      "then": { "properties": { "payload": { "$ref": "#/definitions/TokenChunk" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "Done" } } },
+      "then": { "properties": { "payload": { "$ref": "#/definitions/Done" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "Error" } } },
+      "then": { "properties": { "payload": { "$ref": "#/definitions/Error" } } }
+    }
+  ],
+  "definitions": {
+    "ScheduleStateValue": {
+      "type": "string",
+      "enum": ["awake", "asleep", "draining"]
+    },
+    "GpuVendor": {
+      "type": "string",
+      "enum": ["nvidia", "amd", "apple", "intel"]
+    },
+    "OsKind": {
+      "type": "string",
+      "enum": ["macos", "linux", "windows"]
+    },
+    "Backend": {
+      "type": "string",
+      "enum": ["vllm", "llama.cpp", "mlx"]
+    },
+    "GpuInfo": {
+      "type": "object",
+      "required": ["vendor", "name", "vram_mb"],
+      "properties": {
+        "vendor": { "$ref": "#/definitions/GpuVendor" },
+        "name": { "type": "string" },
+        "vram_mb": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "OwnerLimits": {
+      "type": "object",
+      "required": ["gpu_power_pct", "memory_limit_mb"],
+      "properties": {
+        "gpu_power_pct": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "memory_limit_mb": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Metrics": {
+      "type": "object",
+      "required": [
+        "vram_used_mb",
+        "vram_total_mb",
+        "gpu_util_pct",
+        "tps",
+        "latency_ms",
+        "in_flight"
+      ],
+      "properties": {
+        "vram_used_mb": { "type": "integer", "minimum": 0 },
+        "vram_total_mb": { "type": "integer", "minimum": 0 },
+        "gpu_util_pct": { "type": "number", "minimum": 0, "maximum": 100 },
+        "tps": { "type": "number", "minimum": 0 },
+        "latency_ms": { "type": "number", "minimum": 0 },
+        "in_flight": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "CatalogModel": {
+      "type": "object",
+      "description": "A model entry resolved by the Fleet Manager for the receiving node's GPU vendor. The `id` is the developer-facing alias; `download_url`, `sha256`, and `backend` are the vendor-specific variant.",
+      "required": [
+        "id",
+        "display_name",
+        "download_url",
+        "sha256",
+        "size_bytes",
+        "context_length",
+        "params_billions",
+        "backend"
+      ],
+      "properties": {
+        "id": { "type": "string", "description": "Developer-facing alias, stable across all hardware." },
+        "display_name": { "type": "string" },
+        "download_url": { "type": "string", "format": "uri" },
+        "sha256": { "type": "string" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "context_length": { "type": "integer", "minimum": 1 },
+        "params_billions": { "type": "number", "minimum": 0 },
+        "backend": { "$ref": "#/definitions/Backend" }
+      }
+    },
+    "Usage": {
+      "type": "object",
+      "required": ["prompt_tokens", "completion_tokens", "total_tokens"],
+      "properties": {
+        "prompt_tokens": { "type": "integer", "minimum": 0 },
+        "completion_tokens": { "type": "integer", "minimum": 0 },
+        "total_tokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Register": {
+      "type": "object",
+      "required": ["node_id", "hostname", "os", "gpu", "limits", "selected_models"],
+      "properties": {
+        "node_id": { "type": "string" },
+        "hostname": { "type": "string" },
+        "os": { "$ref": "#/definitions/OsKind" },
+        "gpu": { "$ref": "#/definitions/GpuInfo" },
+        "limits": { "$ref": "#/definitions/OwnerLimits" },
+        "selected_models": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "CatalogRequest": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "CatalogResponse": {
+      "type": "object",
+      "required": ["models"],
+      "properties": {
+        "models": { "type": "array", "items": { "$ref": "#/definitions/CatalogModel" } }
+      }
+    },
+    "Heartbeat": {
+      "type": "object",
+      "required": ["node_id", "metrics", "schedule_state"],
+      "properties": {
+        "node_id": { "type": "string" },
+        "metrics": { "$ref": "#/definitions/Metrics" },
+        "schedule_state": { "$ref": "#/definitions/ScheduleStateValue" }
+      }
+    },
+    "ModelStatus": {
+      "type": "object",
+      "required": ["node_id", "ready_models"],
+      "properties": {
+        "node_id": { "type": "string" },
+        "ready_models": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "ScheduleState": {
+      "type": "object",
+      "required": ["node_id", "state"],
+      "properties": {
+        "node_id": { "type": "string" },
+        "state": { "$ref": "#/definitions/ScheduleStateValue" }
+      }
+    },
+    "PromptDispatch": {
+      "type": "object",
+      "required": ["request_id", "model", "payload"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "model": { "type": "string" },
+        "payload": { "type": "object" }
+      }
+    },
+    "TokenChunk": {
+      "type": "object",
+      "required": ["request_id", "delta", "index"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "delta": { "type": "string" },
+        "index": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "Done": {
+      "type": "object",
+      "required": ["request_id", "usage"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "usage": { "$ref": "#/definitions/Usage" }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "required": ["request_id", "message"],
+      "properties": {
+        "request_id": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    }
+  }
+}

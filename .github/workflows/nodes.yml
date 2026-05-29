@@ -1,0 +1,125 @@
+name: Nodes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "jw-swarm-nodes/**"
+      - "proto/**"
+      - ".github/workflows/nodes.yml"
+    tags:
+      - "nodes-v*"
+  pull_request:
+    paths:
+      - "jw-swarm-nodes/**"
+      - "proto/**"
+      - ".github/workflows/nodes.yml"
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------- Linux ----
+  linux:
+    name: Linux node (Rust)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jw-swarm-nodes/linux
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: jw-swarm-nodes/linux
+      - name: Build release
+        run: cargo build --release
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+      - name: Build .deb
+        run: cargo deb
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-swarm-node-deb
+          path: jw-swarm-nodes/linux/target/debian/*.deb
+
+  # ---------------------------------------------------------------- macOS ----
+  macos:
+    name: macOS node (Swift)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for project
+        id: check
+        run: |
+          if ls jw-swarm-nodes/macos/*.xcodeproj jw-swarm-nodes/macos/Package.swift >/dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::macOS node project not present yet (Phase 4); skipping build."
+          fi
+      - name: Build & package (.dmg/.pkg)
+        if: steps.check.outputs.present == 'true'
+        working-directory: jw-swarm-nodes/macos
+        run: |
+          if [ -f Package.swift ]; then
+            swift build -c release
+          else
+            xcodebuild -scheme JWSwarmNode -configuration Release
+          fi
+      - name: Upload macOS package
+        if: steps.check.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-swarm-node-macos
+          path: jw-swarm-nodes/macos/build/**/*.{dmg,pkg,app}
+          if-no-files-found: ignore
+
+  # -------------------------------------------------------------- Windows ----
+  windows:
+    name: Windows node (.NET / WinUI 3)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for project
+        id: check
+        shell: pwsh
+        run: |
+          if (Get-ChildItem -Path jw-swarm-nodes/windows -Recurse -Include *.sln,*.csproj -ErrorAction SilentlyContinue) {
+            "present=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "present=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Output "::notice::Windows node project not present yet (Phase 5); skipping build."
+          }
+      - name: Setup .NET
+        if: steps.check.outputs.present == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build & package (.msi)
+        if: steps.check.outputs.present == 'true'
+        working-directory: jw-swarm-nodes/windows
+        run: dotnet build -c Release
+      - name: Upload Windows package
+        if: steps.check.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jw-swarm-node-windows
+          path: jw-swarm-nodes/windows/**/bin/Release/**/*.{msi,exe}
+          if-no-files-found: ignore
+
+  # -------------------------------------------------------------- Release ----
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [linux, macos, windows]
+    if: startsWith(github.ref, 'refs/tags/nodes-v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*

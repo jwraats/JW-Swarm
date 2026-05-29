@@ -1,0 +1,88 @@
+@startuml JW-Swarm-Architecture
+title JW Swarm (Joint Weights) — Distributed LLM Inference Cluster
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultTextAlignment center
+skinparam rectangle {
+    BackgroundColor #F7F9FC
+    BorderColor #4A6FA5
+}
+
+actor "Developer" as Dev
+
+node "User Client" {
+    [Opencode] as Opencode
+    note right of Opencode
+        Coding frontend.
+        Sees a single
+        OpenAI-compatible
+        API endpoint.
+    end note
+}
+
+node "Public Entry Point" {
+    [HAProxy] as HAProxy
+    note right of HAProxy
+        TLS termination
+        HTTP + WebSocket routing
+        Load balancing
+        mTLS for node tunnels
+    end note
+}
+
+node "Orchestrator" {
+    [Fleet Manager] as Fleet
+    database "Live Node Registry" as Registry
+    note right of Registry
+        Per node:
+        - model size
+        - VRAM usage
+        - TPS
+        - latency
+    end note
+    database "Persistent DB\n(SQLite)" as DB
+    note right of DB
+        - nodes (identity)
+        - sessions (uptime)
+        - deliveries (tokens)
+        - points ledger
+    end note
+}
+
+package "Inference Nodes (The Fleet)" {
+    node "MacBook (Apple Silicon)" {
+        [Inference Backend\n(MLX)] as Mac
+    }
+    node "Linux Host (NVIDIA)" {
+        [Inference Backend\n(vLLM / CUDA)] as LinuxNv
+    }
+    node "Windows Host (NVIDIA)" {
+        [Inference Backend\n(vLLM / CUDA)] as WinNv
+    }
+    node "Windows Host (AMD)" {
+        [Inference Backend\n(llama.cpp / ROCm)] as WinAmd
+    }
+}
+
+Dev --> Opencode : uses
+
+Opencode --> HAProxy : OpenAI-compatible\nrequests (HTTPS/WSS)
+HAProxy --> Fleet : forwards requests
+Fleet --> Registry : reads / updates metrics
+Fleet --> DB : persist nodes, sessions,\ndeliveries, points
+
+Fleet <..> HAProxy : node tunnels\n(dispatch prompt + stream tokens)
+
+Mac <..> HAProxy : persistent tunnel\n(WSS, mTLS)\nfast iteration
+LinuxNv <..> HAProxy : persistent tunnel\n(WSS, mTLS)\nlarge context
+WinNv <..> HAProxy : persistent tunnel\n(WSS, mTLS)\nlarge context
+WinAmd <..> HAProxy : persistent tunnel\n(WSS, mTLS)
+
+legend right
+    | Connection | Meaning |
+    | solid | Client request / routing path |
+    | dotted | Persistent node tunnel: WSS + mTLS, opened outbound by the node (may be remote). Carries registration, metrics, prompt dispatch, and token streaming |
+endlegend
+
+@enduml

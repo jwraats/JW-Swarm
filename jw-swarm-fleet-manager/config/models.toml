@@ -1,0 +1,93 @@
+# JW Swarm model catalog (allowlist).
+#
+# This file is the static source of truth for which models nodes are allowed to
+# host. The Fleet Manager loads it on startup and serves it to nodes via the
+# CatalogResponse message.
+#
+# Each model has a developer-facing `alias` that stays the same regardless of
+# hardware (e.g. a client always asks for "qwen3-coder"). Each `[[model.variant]]`
+# is the hardware-specific artifact the Fleet Manager resolves per node based on
+# the node's GPU vendor, so:
+#   - Apple Silicon  -> MLX model
+#   - NVIDIA         -> CUDA (vLLM) model
+#   - AMD            -> ROCm (llama.cpp) model
+#   - Intel          -> SYCL/Vulkan (llama.cpp) model
+#
+# Each variant includes a download URL and sha256 so every node of a given
+# vendor runs the exact same artifact.
+#
+# `backend` values: vllm | llama.cpp | mlx
+# `vendor`  values: nvidia | amd | apple | intel
+
+# ---------------------------------------------------------------------------
+[[model]]
+alias = "qwen3-coder"
+display_name = "Qwen3 Coder"
+
+[[model.variant]]
+vendor = "apple"
+backend = "mlx"
+download_url = "https://huggingface.co/mlx-community/Qwen3-Coder-7B-Instruct-4bit/resolve/main/model.safetensors"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+size_bytes = 4200000000
+context_length = 32768
+params_billions = 7.6
+
+[[model.variant]]
+vendor = "nvidia"
+backend = "vllm"
+download_url = "https://huggingface.co/Qwen/Qwen3-Coder-7B-Instruct/resolve/main/model.safetensors"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+size_bytes = 15200000000
+context_length = 32768
+params_billions = 7.6
+
+[[model.variant]]
+vendor = "amd"
+backend = "llama.cpp"
+download_url = "https://huggingface.co/Qwen/Qwen3-Coder-7B-Instruct-GGUF/resolve/main/qwen3-coder-7b-instruct-q4_k_m.gguf"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+size_bytes = 4683073024
+context_length = 32768
+params_billions = 7.6
+
+[[model.variant]]
+vendor = "intel"
+backend = "llama.cpp"
+download_url = "https://huggingface.co/Qwen/Qwen3-Coder-7B-Instruct-GGUF/resolve/main/qwen3-coder-7b-instruct-q4_k_m.gguf"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+size_bytes = 4683073024
+context_length = 32768
+params_billions = 7.6
+
+# ---------------------------------------------------------------------------
+[[model]]
+alias = "qwen3-coder-32b"
+display_name = "Qwen3 Coder 32B"
+
+[[model.variant]]
+vendor = "apple"
+backend = "mlx"
+download_url = "https://huggingface.co/mlx-community/Qwen3-Coder-32B-Instruct-4bit/resolve/main/model.safetensors"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+size_bytes = 18000000000
+context_length = 32768
+params_billions = 32.5
+
+[[model.variant]]
+vendor = "nvidia"
+backend = "vllm"
+download_url = "https://huggingface.co/Qwen/Qwen3-Coder-32B-Instruct/resolve/main/model.safetensors"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+size_bytes = 65000000000
+context_length = 32768
+params_billions = 32.5
+
+[[model.variant]]
+vendor = "amd"
+backend = "llama.cpp"
+download_url = "https://huggingface.co/Qwen/Qwen3-Coder-32B-Instruct-GGUF/resolve/main/qwen3-coder-32b-instruct-q4_k_m.gguf"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+size_bytes = 19851959296
+context_length = 32768
+params_billions = 32.5

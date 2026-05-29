@@ -1,0 +1,25 @@
+[package]
+name = "jw-swarm-node"
+version = "0.1.0"
+edition = "2024"
+description = "JW Swarm inference node agent (Linux CLI + systemd service)"
+license = "MIT"
+
+[[bin]]
+name = "jw-swarm-node"
+path = "src/main.rs"
+
+[dependencies]
+
+[package.metadata.deb]
+maintainer = "JW Swarm <noreply@example.com>"
+copyright = "2026, JW Swarm"
+license-file = ["../../LICENSE", "0"]
+extended-description = "Inference node agent for the JW Swarm distributed LLM inference cluster."
+depends = "$auto"
+section = "net"
+priority = "optional"
+assets = [
+    ["target/release/jw-swarm-node", "usr/bin/", "755"],
+]
+systemd-units = { unit-name = "jw-swarm-node", unit-scripts = "packaging/debian", enable = false }

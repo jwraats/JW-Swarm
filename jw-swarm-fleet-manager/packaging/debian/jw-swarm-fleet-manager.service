@@ -1,0 +1,24 @@
+[Unit]
+Description=JW Swarm Fleet Manager
+Documentation=https://github.com/JWrrr/JW-Swarm
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=jw-swarm
+Environment=JW_BIND=127.0.0.1:8080
+Environment=JW_CATALOG=/etc/jw-swarm/models.toml
+Environment=JW_DB=/var/lib/jw-swarm/fleet.db
+Environment=RUST_LOG=info
+ExecStart=/usr/bin/jw-swarm-fleet-manager
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

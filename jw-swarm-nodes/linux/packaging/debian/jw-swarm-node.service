@@ -1,0 +1,21 @@
+[Unit]
+Description=JW Swarm Inference Node
+Documentation=https://github.com/JWrrr/JW-Swarm
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=jw-swarm-node
+Environment=JW_FLEET_URL=wss://swarm.example.com/node/connect
+Environment=JW_NODE_CERT=/etc/jw-swarm-node/node.pem
+Environment=JW_CA_CERT=/etc/jw-swarm-node/ca.crt
+Environment=RUST_LOG=info
+ExecStart=/usr/bin/jw-swarm-node
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
