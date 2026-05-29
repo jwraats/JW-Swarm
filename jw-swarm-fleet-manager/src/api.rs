@@ -3,13 +3,13 @@
 use std::convert::Infallible;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::warn;
 use uuid::Uuid;
@@ -48,10 +48,7 @@ pub async fn list_models(State(state): State<AppState>) -> Json<Value> {
 }
 
 /// `POST /v1/chat/completions` — route to a node and stream/return the result.
-pub async fn chat_completions(
-    State(state): State<AppState>,
-    Json(body): Json<Value>,
-) -> Response {
+pub async fn chat_completions(State(state): State<AppState>, Json(body): Json<Value>) -> Response {
     let model = match body.get("model").and_then(|m| m.as_str()) {
         Some(m) => m.to_string(),
         None => {
@@ -79,7 +76,10 @@ pub async fn chat_completions(
     let sender = match state.registry.node_sender(&node_id) {
         Some(tx) => tx,
         None => {
-            return error_response(StatusCode::SERVICE_UNAVAILABLE, "selected node disconnected");
+            return error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "selected node disconnected",
+            );
         }
     };
 
@@ -98,7 +98,10 @@ pub async fn chat_completions(
 
     if sender.send(dispatch).is_err() {
         state.registry.complete_request(&request_id);
-        return error_response(StatusCode::SERVICE_UNAVAILABLE, "failed to dispatch to node");
+        return error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "failed to dispatch to node",
+        );
     }
 
     if stream {
@@ -108,7 +111,13 @@ pub async fn chat_completions(
     }
 }
 
-fn chunk_json(request_id: &str, model: &str, created: u64, delta: &str, finish: Option<&str>) -> Value {
+fn chunk_json(
+    request_id: &str,
+    model: &str,
+    created: u64,
+    delta: &str,
+    finish: Option<&str>,
+) -> Value {
     json!({
         "id": format!("chatcmpl-{request_id}"),
         "object": "chat.completion.chunk",
@@ -144,10 +153,7 @@ fn stream_response(
 ) -> Response {
     let created = unix_now();
     let rid = request_id.clone();
-    let guard = CleanupGuard {
-        state,
-        request_id,
-    };
+    let guard = CleanupGuard { state, request_id };
 
     let sse_stream = UnboundedReceiverStream::new(event_rx)
         .map(move |ev| {
@@ -168,8 +174,9 @@ fn events_for(
     created: u64,
 ) -> Vec<Result<Event, Infallible>> {
     match ev {
-        RequestEvent::Chunk(c) => vec![Ok(Event::default()
-            .data(chunk_json(rid, model, created, &c.delta, None).to_string()))],
+        RequestEvent::Chunk(c) => vec![Ok(
+            Event::default().data(chunk_json(rid, model, created, &c.delta, None).to_string())
+        )],
         RequestEvent::Done(_) => vec![
             Ok(Event::default()
                 .data(chunk_json(rid, model, created, "", Some("stop")).to_string())),

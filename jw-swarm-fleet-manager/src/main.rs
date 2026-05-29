@@ -10,8 +10,8 @@ mod tunnel;
 
 use std::net::SocketAddr;
 
-use axum::routing::{get, post};
 use axum::Router;
+use axum::routing::{get, post};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 

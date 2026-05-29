@@ -4,8 +4,8 @@
 //! connection. Each node connection runs a writer task (draining an mpsc
 //! channel to the socket) and a reader loop (handling inbound messages).
 
-use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
+use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
@@ -122,15 +122,21 @@ fn handle_message(
         }
         Message::TokenChunk(chunk) => {
             let req = chunk.request_id.clone();
-            state.registry.dispatch_event(&req, RequestEvent::Chunk(chunk));
+            state
+                .registry
+                .dispatch_event(&req, RequestEvent::Chunk(chunk));
         }
         Message::Done(done) => {
             let req = done.request_id.clone();
-            state.registry.dispatch_event(&req, RequestEvent::Done(done));
+            state
+                .registry
+                .dispatch_event(&req, RequestEvent::Done(done));
         }
         Message::Error(err) => {
             let req = err.request_id.clone();
-            state.registry.dispatch_event(&req, RequestEvent::Error(err));
+            state
+                .registry
+                .dispatch_event(&req, RequestEvent::Error(err));
         }
         // Server-only messages should never arrive from a node.
         Message::CatalogResponse(_) | Message::PromptDispatch(_) => {

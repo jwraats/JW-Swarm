@@ -1,7 +1,7 @@
 //! Node selection (routing/scheduling) logic.
 
-use crate::registry::NodeState;
 use crate::proto::ScheduleStateValue;
+use crate::registry::NodeState;
 
 /// Tunable scoring weights for node selection.
 #[derive(Debug, Clone, Copy)]
