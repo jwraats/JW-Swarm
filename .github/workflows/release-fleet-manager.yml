@@ -1,0 +1,42 @@
+name: Release — Fleet Manager
+
+# Triggered only by pushing a tag like `fleet-manager-v0.1.0`.
+# No `paths` filter here: tag pushes do not reliably match path filters,
+# so release triggers are kept separate from the path-scoped CI workflow.
+on:
+  push:
+    tags:
+      - "fleet-manager-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: jw-swarm-fleet-manager
+
+jobs:
+  release:
+    name: Build .deb and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: jw-swarm-fleet-manager
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+      - name: Build .deb
+        run: cargo deb
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: jw-swarm-fleet-manager-deb
+          path: jw-swarm-fleet-manager/target/debian/*.deb
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: jw-swarm-fleet-manager/target/debian/*.deb
