@@ -1,16 +1,15 @@
 import Foundation
+import Darwin
 
 final class Tunnel {
     private let fleetURL: URL
     private var socket: URLSessionWebSocketTask?
     private var onMessage: ((String) -> Void)?
     private var backoff: TimeInterval = 1
-    private var queue: [String] = []
-    private let lock = NSLock()
+    private var _queue: [String] = []
+    private var _lock = os_unfair_lock()
 
-    init(fleetURL: URL) {
-        self.fleetURL = fleetURL
-    }
+    init(fleetURL: URL) { self.fleetURL = fleetURL }
 
     func start() {
         Task { @MainActor in await run() }
@@ -42,23 +41,24 @@ final class Tunnel {
     }
 
     nonisolated func sendSync(_ text: String) {
-        guard let t = socket else {
-            lock.lock()
-            queue.append(text)
-            lock.unlock()
-            return
+        nonisolated(unsafe) let sock = socket
+        if let t = sock {
+            Task { try? await t.send(.string(text)) }; return
         }
-        Task { try? await t.send(.string(text)) }
+        os_unfair_lock_lock(&_lock)
+        _queue.append(text)
+        os_unfair_lock_unlock(&_lock)
     }
 
     @MainActor
     private func drain() async {
-        var m: [String] = []
-        lock.lock()
-        m = queue; queue.removeAll()
-        lock.unlock()
+        os_unfair_lock_lock(&_lock)
+        let m = _queue; _queue.removeAll()
+        os_unfair_lock_unlock(&_lock)
         guard let t = socket else {
-            lock.lock(); queue = m; lock.unlock(); return
+            os_unfair_lock_lock(&_lock)
+            _queue = m; os_unfair_lock_unlock(&_lock)
+            return
         }
         for s in m { try? await t.send(.string(s)) }
     }

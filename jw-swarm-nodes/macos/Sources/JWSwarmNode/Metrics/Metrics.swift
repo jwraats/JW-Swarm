@@ -35,7 +35,7 @@ private func gpuUtilPct() -> Double {
     let pipe = Pipe()
     task.standardOutput = pipe
     try? task.run(); task.waitUntilExit()
-    guard let data = try? pipe.fileHandleForReading.read(uptoCount: Int.max), !data.isEmpty else {
+    guard let data = try? pipe.fileHandleForReading.read(upToCount: Int.max), !data.isEmpty else {
         return 0
     }
     guard let text = String(data: data, encoding: .utf8) else { return 0 }
