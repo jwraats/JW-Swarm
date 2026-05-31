@@ -22,17 +22,9 @@ impl Default for Weights {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Accounting {
     pub weights: Weights,
-}
-
-impl Default for Accounting {
-    fn default() -> Self {
-        Self {
-            weights: Weights::default(),
-        }
-    }
 }
 
 impl Accounting {
