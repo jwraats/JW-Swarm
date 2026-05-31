@@ -15,7 +15,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-final class NodeCoordinator: ObservableObject, @unchecked Sendable {
+final class NodeCoordinator: ObservableObject {
     static let shared = NodeCoordinator()
     @Published var status: String = "Disconnected"
     @Published var readyModels: [String] = []
@@ -25,6 +25,7 @@ final class NodeCoordinator: ObservableObject, @unchecked Sendable {
     private var config: AppConfig?
     private let backend = StubBackend()
     private var heartbeatTimer: Timer?
+    nonisolated private let syncQ = DispatchQueue(label: "com.jwswarm.sync")
 
     func start(config: AppConfig) {
         self.config = config
@@ -37,26 +38,21 @@ final class NodeCoordinator: ObservableObject, @unchecked Sendable {
         tunnel?.start()
         DispatchQueue.main.async { self.status = "Connecting..." }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.sendRegister()
-            self?.sendCatalogRequest()
+            self?.syncQ.async { self?.sendRegister() }
+            self?.syncQ.async { self?.sendCatalogRequest() }
         }
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            self?.sendHeartbeat()
+            self?.syncQ.async { self?.sendHeartbeat() }
         }
     }
 
     private func sendRegister() {
         guard let c = config, let t = tunnel else { return }
         let m = collectMetrics()
-        let gpu = GpuInfo(vendor: .apple, name: m.name, vram_mb: m.totalMB)
-        let lim = OwnerLimits(
-            gpu_power_pct: c.limits.gpu_power_pct,
-            memory_limit_mb: c.limits.memory_limit_mb
-        )
-        let payload = RegisterPayload(
-            node_id: c.node_id, hostname: c.hostname, os: .macos,
-            gpu: gpu, limits: lim, selected_models: c.selected_models
-        )
+        let gpu = GpuInfo(vendor: .apple, name: "Apple Silicon", vram_mb: m.totalMB)
+        let lim = OwnerLimits(gpu_power_pct: c.limits.gpu_power_pct, memory_limit_mb: c.limits.memory_limit_mb)
+        let payload = RegisterPayload(node_id: c.node_id, hostname: c.hostname, os: .macos,
+                                       gpu: gpu, limits: lim, selected_models: c.selected_models)
         do {
             let json = try PayloadType.register(payload).toJSON()
             t.sendSync(json)
@@ -79,14 +75,10 @@ final class NodeCoordinator: ObservableObject, @unchecked Sendable {
     private func sendHeartbeat() {
         guard let c = config, let t = tunnel else { return }
         let m = collectMetrics()
-        let metrics = NodeMetrics(
-            vram_used_mb: m.usedMB, vram_total_mb: m.totalMB,
-            gpu_util_pct: m.gpuPct, tps: 0, latency_ms: 0, in_flight: 0
-        )
-        let hb = HeartbeatPayload(
-            node_id: c.node_id, metrics: metrics,
-            schedule_state: isAwake ? .awake : .asleep
-        )
+        let metrics = NodeMetrics(vram_used_mb: m.usedMB, vram_total_mb: m.totalMB,
+                                   gpu_util_pct: m.gpuPct, tps: 0, latency_ms: 0, in_flight: 0)
+        let hb = HeartbeatPayload(node_id: c.node_id, metrics: metrics,
+                                   schedule_state: isAwake ? .awake : .asleep)
         do {
             let json = try PayloadType.heartbeat(hb).toJSON()
             t.sendSync(json)
@@ -108,7 +100,7 @@ final class NodeCoordinator: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func handleInbound(_ text: String) {
+    nonisolated private func handleInbound(_ text: String) {
         guard let msg = try? PayloadType.fromJSON(text) else { return }
         switch msg {
         case .catalogResponse(let cr): handleCatalog(cr)
@@ -120,10 +112,10 @@ final class NodeCoordinator: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func handleCatalog(_ cr: CatalogResponsePayload) {
+    nonisolated private func handleCatalog(_ cr: CatalogResponsePayload) {
         let count = cr.models.count
         DispatchQueue.main.async { self.status = "Catalog: \(count) models" }
-        let sel = config?.selected_models
+        let sel = self.config?.selected_models
         let toDownload: [CatalogModel] =
             (sel?.isEmpty == false) ? cr.models.filter { sel!.contains($0.id) } : cr.models
         Task.detached { [weak self, toDownload] in

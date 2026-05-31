@@ -4,16 +4,13 @@ struct MetricsInfo {
     let totalMB: UInt64
     let usedMB: UInt64
     let gpuPct: Double
-    let name: String
 }
 
 func collectMetrics() -> MetricsInfo {
-    return MetricsInfo(
-        totalMB: totalMemoryMB(),
-        usedMB: usedMemoryMB(),
-        gpuPct: gpuUtilPct(),
-        name: "Apple Silicon"
-    )
+    let total = totalMemoryMB()
+    let used  = usedMemoryMB()
+    let gpu   = gpuUtilPct()
+    return MetricsInfo(totalMB: total, usedMB: used, gpuPct: gpu)
 }
 
 private func totalMemoryMB() -> UInt64 {
@@ -29,9 +26,11 @@ private func usedMemoryMB() -> UInt64 {
         MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size
     )
     let host = mach_host_self()
-    let ptr = withUnsafePointer(to: &info) { $0 }
+    let ptr = &info
+        .withMemoryRebound(to: integer_t.self, capacity: 1) { $0 }
     guard host_statistics64(host, HOST_VM_INFO64, ptr, &count) == KERN_SUCCESS else { return 0 }
-    let used = UInt64(info.active_count + info.inactive_count + info.wire_count) * UInt64(vm_page_size)
+    let used = UInt64(info.active_count + info.inactive_count + info.wire_count)
+        * UInt64(vm_page_size)
     return used / (1024 * 1024)
 }
 

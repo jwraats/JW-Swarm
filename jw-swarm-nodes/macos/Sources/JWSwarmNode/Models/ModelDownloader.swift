@@ -14,9 +14,7 @@ final class ModelDownloader {
                 log("\(m.id) already verified"); return
             }
         }
-        try FileManager.default.createDirectory(
-            at: dir, withIntermediateDirectories: true, attributes: nil
-        )
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
         let dest = dir.appendingPathComponent("weights.bin")
         log("downloading \(m.id) (\(m.size_bytes) bytes)")
         guard let url = URL(string: m.download_url) else { throw DLE.invalidURL }
