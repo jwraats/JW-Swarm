@@ -8,27 +8,19 @@ struct NodeMenuView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Image(systemName: statusIcon)
-                    .foregroundColor(statusColor)
-                Text(coordinator.status)
-                    .font(.system(.subheadline, design: .monospaced))
+                Image(systemName: statusIcon).foregroundColor(statusColor)
+                Text(coordinator.status).font(.system(.subheadline, design: .monospaced))
                 Spacer()
             }
             if !coordinator.readyModels.isEmpty {
                 Text("Models: \(coordinator.readyModels.joined(separator: ", "))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
             }
             Divider()
             HStack {
-                Text("State")
-                Spacer()
-                Toggle("", isOn: $coordinator.isAwake)
-                    .toggleStyle(.switch)
-                    .scaleEffect(0.8)
-                Text(coordinator.isAwake ? "Awake" : "Asleep")
-                    .font(.caption)
+                Text("State"); Spacer()
+                Toggle("", isOn: $coordinator.isAwake).toggleStyle(.switch).scaleEffect(0.8)
+                Text(coordinator.isAwake ? "Awake" : "Asleep").font(.caption)
             }
             Divider()
             Button("Configure...") { showConfig = true }
@@ -36,8 +28,7 @@ struct NodeMenuView: View {
             Divider()
             Button("Quit") { NSApplication.shared.terminate(nil) }
         }
-        .padding()
-        .frame(width: 280)
+        .padding().frame(width: 280)
     }
 
     private var statusIcon: String {
@@ -70,18 +61,13 @@ struct ConfigPopoverView: View {
                 TextField("CA Cert", text: $vm.caPath)
             }
             Section("Limits") {
-                Slider(value: $vm.gpuPower, in: 0...100) {
-                    Text("GPU: \(Int(vm.gpuPower))%")
-                }
-                Stepper("\(vm.memoryLimit) MB",
-                        value: $vm.memoryLimit, in: 1024...65536, step: 1024)
+                Slider(value: $vm.gpuPower, in: 0...100) { Text("GPU: \(Int(vm.gpuPower))%") }
+                Stepper("\(vm.memoryLimit) MB", value: $vm.memoryLimit, in: 1024...65536, step: 1024)
             }
             Section("") {
                 Button("Save & Restart") {
-                    vm.save()
-                    NSApplication.shared.terminate(nil)
-                }
-                .buttonStyle(.borderedProminent)
+                    vm.save(); NSApplication.shared.terminate(nil)
+                }.buttonStyle(.borderedProminent)
             }
         }
         .frame(width: 350, height: 250)
