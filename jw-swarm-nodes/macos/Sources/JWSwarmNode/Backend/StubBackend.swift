@@ -1,11 +1,10 @@
 import Foundation
 
-final class StubBackend {
+@unchecked Sendable final class StubBackend {
     private var models: [String] = []
-    private let lock = NSLock()
 
-    func register(_ id: String) { lock.lock(); defer { lock.unlock() }; models.append(id) }
-    func ready() -> [String] { lock.lock(); defer { lock.unlock() }; return models }
+    func register(_ id: String) { models.append(id) }
+    func ready() -> [String] { models }
 
     func dispatch(_ pd: PromptDispatchPayload, sender: @escaping (String) -> Void) {
         let stub = ["Hello", ",", " ", "simulated", " ", "response", ".", " ", "!"]

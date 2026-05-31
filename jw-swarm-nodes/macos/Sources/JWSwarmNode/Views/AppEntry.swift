@@ -15,17 +15,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-@MainActor
 final class NodeCoordinator: ObservableObject {
     static let shared = NodeCoordinator()
     @Published var status: String = "Disconnected"
     @Published var readyModels: [String] = []
     @Published var isAwake: Bool = true
 
-    private var tunnel: Tunnel?
-    private var config: AppConfig?
-    private let backend = StubBackend()
-    private var heartbeatTask: Task<Void, Never>?
+    nonisolated(unsafe) private var tunnel: Tunnel?
+    nonisolated(unsafe) private var config: AppConfig?
+    nonisolated(unsafe) private let backend = StubBackend()
+    nonisolated(unsafe) private var heartbeatTask: Task<Void, Never>?
 
     func start(config: AppConfig) async {
         self.config = config
@@ -33,7 +32,7 @@ final class NodeCoordinator: ObservableObject {
             status = "Invalid fleet URL"; return
         }
         tunnel = Tunnel(fleetURL: fleetURL)
-        tunnel?.setIncomingHandler { [weak self] text in
+        tunnel?.setIncomingHandler { @MainActor [weak self] text in
             self?.handleInbound(text)
         }
         tunnel?.start()
@@ -95,6 +94,7 @@ final class NodeCoordinator: ObservableObject {
         } catch { NSLog("ModelStatus failed: \(error)") }
     }
 
+    @MainActor
     private func handleInbound(_ text: String) {
         guard let msg = try? PayloadType.fromJSON(text) else { return }
         switch msg {
