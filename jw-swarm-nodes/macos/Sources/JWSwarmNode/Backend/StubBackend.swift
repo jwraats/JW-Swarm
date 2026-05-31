@@ -1,15 +1,13 @@
 import Foundation
 
+@unchecked Sendable
 final class StubBackend {
-    private var _models: [String] = []
+    nonisolated(unsafe) private var _models: [String] = []
 
-    @MainActor
-    func register(_ id: String) { _models.append(id) }
-    @MainActor
-    func ready() -> [String] { _models }
+    nonisolated func register(_ id: String) { _models.append(id) }
+    nonisolated func ready() -> [String] { _models }
 
-    @MainActor
-    func dispatch(_ pd: PromptDispatchPayload, sender: @escaping (String) -> Void) {
+    nonisolated func dispatch(_ pd: PromptDispatchPayload, sender: @escaping (String) -> Void) {
         let stub = ["Hello", ",", " ", "simulated", " ", "response", ".", " ", "!"]
         var pt: UInt32 = 50
         if let rawMsgs = pd.payload["messages"]?.value as? [Any] {

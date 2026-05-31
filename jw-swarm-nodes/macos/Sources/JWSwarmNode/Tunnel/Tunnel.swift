@@ -1,27 +1,65 @@
 import Foundation
 
 @unchecked Sendable
+final class StubBackend {
+    nonisolated(unsafe) private var _models: [String] = []
+
+    nonisolated func register(_ id: String) { _models.append(id) }
+    nonisolated func ready() -> [String] { _models }
+
+    nonisolated func dispatch(_ pd: PromptDispatchPayload, sender: @escaping (String) -> Void) {
+        let stub = ["Hello", ",", " ", "simulated", " ", "response", ".", " ", "!"]
+        var pt: UInt32 = 50
+        if let rawMsgs = pd.payload["messages"]?.value as? [Any] {
+            for msgAny in rawMsgs {
+                if let d = msgAny as? [String: Any],
+                   let c = d["content"] as? String {
+                    pt = UInt32(max(c.count / 4, 1))
+                }
+            }
+        }
+        for (i, tok) in stub.enumerated() {
+            guard let j = try? PayloadType.tokenChunk(
+                TokenChunkPayload(request_id: pd.request_id, delta: tok, index: UInt32(i))
+            ).toJSON() else { continue }
+            sender(j)
+        }
+        guard let j = try? PayloadType.done(
+            DonePayload(request_id: pd.request_id,
+                       usage: Usage(prompt_tokens: pt,
+                                    completion_tokens: UInt32(stub.count),
+                                    total_tokens: UInt32(Int(pt) + stub.count)))
+        ).toJSON() else { return }
+        sender(j)
+        NSLog("[Backend] stub done for \(pd.request_id)")
+    }
+}
+
+@unchecked Sendable
 final class Tunnel {
-    private let fleetURL: URL
-    var socket: URLSessionWebSocketTask? = nil
-    var onMessage: ((String) -> Void)?
-    var backoff: Double = 1
-    var queue: [String] = []
+    nonisolated(unsafe) private let fleetURL: URL
+    nonisolated(unsafe) private var socket: URLSessionWebSocketTask?
+    nonisolated(unsafe) private var onMessage: ((String) -> Void)?
+    nonisolated(unsafe) private var backoff: Double = 1
+    nonisolated(unsafe) private var queue: [String] = []
 
-    init(fleetURL: URL) { self.fleetURL = fleetURL }
+    init(_ url: URL) { self.fleetURL = url }
 
-    func start() {
-        Task { @MainActor in loop() }
+    nonisolated func startLoop() {
+        Task { @MainActor in
+            await run()
+        }
     }
 
     @MainActor
-    private func loop() async {
+    private func run() async {
+        nonisolated(unsafe) let _url = fleetURL
         while !Task.isCancelled {
-            let t = URLSession.shared.webSocketTask(with: fleetURL)
+            let t = URLSession.shared.webSocketTask(with: _url)
             t.resume()
             socket = t
-            log("connected"); backoff = 1
-            drainPending()
+            backoff = 1
+            drainMessages()
             while let r = try? await socket?.receive() {
                 switch r {
                 case .string(let s): onMessage?(s)
@@ -30,30 +68,34 @@ final class Tunnel {
                 default: break
                 }
             }
-            socket?.cancel(); socket = nil
-            log("disconnected; retry in \(backoff)s")
+            socket?.cancel()
+            socket = nil
             try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
             backoff = min(backoff * 2, 60)
         }
     }
 
     @MainActor
-    private func drainPending() {
+    private func drainMessages() {
         let pending = queue; queue.removeAll()
-        guard let t = socket else { queue = pending; return }
-        for msg in pending { Task { @MainActor in try? await t.send(.string(msg)) } }
+        guard let sock = socket else { queue = pending; return }
+        for msg in pending {
+            Task { try? await sock.send(.string(msg)) }
+        }
     }
 
-    @MainActor
-    func send(_ text: String) {
-        if let t = socket { Task { @MainActor in try? await t.send(.string(text)) }; return }
-        queue.append(text)
+    nonisolated func send(_ text: String) {
+        nonisolated(unsafe) let selfRef = self
+        Task { @MainActor in
+            if let sock = selfRef.socket {
+                try? await sock.send(.string(text))
+                return
+            }
+            selfRef.queue.append(text)
+        }
     }
 
-    @MainActor
-    func setIncomingHandler(_ handler: @escaping (String) -> Void) {
-        onMessage = handler
+    nonisolated func setIncomingHandler(_ handler: @escaping (String) -> Void) {
+        Task { @MainActor in self.onMessage = handler }
     }
-
-    private func log(_ msg: String) { NSLog("[Tunnel] \(msg)") }
 }

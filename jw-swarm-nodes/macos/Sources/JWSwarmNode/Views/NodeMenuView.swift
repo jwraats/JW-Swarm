@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 struct NodeMenuView: View {
-    @StateObject private var coordinator = NodeCoordinator.shared
+    @ObservedObject private var coordinator = NodeCoordinator.shared
     @State private var showConfig = false
 
     var body: some View {
