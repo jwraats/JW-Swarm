@@ -132,9 +132,17 @@ fn build_connector(node_cert: &str, ca_cert: &str) -> Option<tokio_tungstenite::
     let root_store = load_root_store(ca_cert)?;
     let provider = Arc::new(rustls::crypto::ring::default_provider());
 
-    let config_builder = rustls::ClientConfig::builder_with_provider(provider)
-        .with_protocol_versions()
-        .with_root_certificates(root_store);
+    let config_builder = match rustls::ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions(&[&rustls::version::TLS13])
+    {
+        Ok(cb) => cb,
+        Err(e) => {
+            warn!("protocol versions error: {}", e);
+            return None;
+        }
+    };
+
+    let config_builder = config_builder.with_root_certificates(root_store);
 
     let cfg = if !node_cert.is_empty() {
         match std::fs::read(node_cert) {
@@ -187,8 +195,8 @@ fn load_root_store(ca_cert: &str) -> Option<Arc<rustls::RootCertStore>> {
             Ok(data) => {
                 let mut cursor = std::io::Cursor::new(&data);
                 let mut count = 0u32;
-                while let c = rustls_pemfile::certs(&mut cursor).next() {
-                    match c {
+                loop {
+                    match rustls_pemfile::certs(&mut cursor).next() {
                         Some(Ok(cert)) => { let _ = store.add(cert); count += 1; }
                         Some(Err(_)) | None => break,
                     }
