@@ -41,11 +41,12 @@ final class NodeCoordinator: ObservableObject {
         nonisolated(unsafe) self.tunnel?.startLoop()
         nonisolated(unsafe) self.status = "Connecting..."
         try? await Task.sleep(nanoseconds: 500_000_000)
-        await doSendRegister()
-        await doSendCatalogRequest()
-        nonisolated(unsafe) self.heartbeatTask = Task { @MainActor in
-            for _ in 0..<1000 {
-                await Self.shared.doSendHeartbeat()
+        doSendRegister()
+        doSendCatalogRequest()
+        nonisolated(unsafe) self.heartbeatTask = Task {
+            while !Task.isCancelled {
+                nonisolated(unsafe) let s = Self.shared
+                s.doSendHeartbeat()
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
@@ -109,7 +110,7 @@ final class NodeCoordinator: ObservableObject {
         }
     }
 
-    nonisolated private     private func handleInbound(_ text: String) {
+    nonisolated private func handleInbound(_ text: String) {
         guard let msg = try? PayloadType.fromJSON(text) else { return }
         switch msg {
         case .catalogResponse(let cr): handleCatalog(cr)
@@ -132,20 +133,18 @@ final class NodeCoordinator: ObservableObject {
             (sel?.isEmpty == false) ? cr.models.filter { sel!.contains($0.id) } : cr.models
         nonisolated(unsafe) let s2 = Self.shared
         s2.status = "Catalog: \(toDownload.count) models"
-        Task.detached { @MainActor [toDownload] in
+        Task.detached { [toDownload] in
             for model in toDownload {
                 do {
                     try await ModelDownloader.shared.downloadModel(model)
-                    nonisolated(unsafe) let s = NodeCoordinator.shared
-                    s.doRegisterBackendModel(model.id)
-                    s.doUpdateReadyModels()
+                    nonisolated(unsafe) let s3 = Self.shared
+                    s3.backend.register(model.id)
+                    s3.doUpdateReadyModels()
                 } catch {
                     NSLog("Download \(model.id) failed: \(error)")
-                    nonisolated(unsafe) let s = NodeCoordinator.shared
-                    s.doUpdateReadyModels()
+                    nonisolated(unsafe) let s4 = Self.shared
+                    s4.doUpdateReadyModels()
                 }
-            }
-        }
             }
         }
     }

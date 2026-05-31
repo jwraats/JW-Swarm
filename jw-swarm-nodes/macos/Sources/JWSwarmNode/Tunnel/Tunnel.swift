@@ -57,8 +57,8 @@ final class Tunnel {
         while !Task.isCancelled {
             let t = URLSession.shared.webSocketTask(with: _url)
             t.resume()
-            socket = t
-            backoff = 1
+            nonisolated(unsafe) self.socket = t
+            nonisolated(unsafe) self.backoff = 1
             drainMessages()
             while let r = try? await socket?.receive() {
                 switch r {
@@ -68,17 +68,20 @@ final class Tunnel {
                 default: break
                 }
             }
-            socket?.cancel()
-            socket = nil
+            nonisolated(unsafe) self.socket?.cancel()
+            nonisolated(unsafe) self.socket = nil
             try? await Task.sleep(nanoseconds: UInt64(backoff * 1_000_000_000))
-            backoff = min(backoff * 2, 60)
+            nonisolated(unsafe) self.backoff = min(backoff * 2, 60)
         }
     }
 
     @MainActor
     private func drainMessages() {
-        let pending = queue; queue.removeAll()
-        guard let sock = socket else { queue = pending; return }
+        nonisolated(unsafe) let pending = queue
+        nonisolated(unsafe) self.queue = []
+        guard let sock = socket else {
+            nonisolated(unsafe) self.queue = pending; return
+        }
         for msg in pending {
             Task { try? await sock.send(.string(msg)) }
         }
@@ -87,15 +90,18 @@ final class Tunnel {
     nonisolated func send(_ text: String) {
         nonisolated(unsafe) let selfRef = self
         Task { @MainActor in
-            if let sock = selfRef.socket {
+            nonisolated(unsafe) let s = selfRef
+            if let sock = s.socket {
                 try? await sock.send(.string(text))
                 return
             }
-            selfRef.queue.append(text)
+            nonisolated(unsafe) s.queue.append(text)
         }
     }
 
     nonisolated func setIncomingHandler(_ handler: @escaping (String) -> Void) {
-        Task { @MainActor in self.onMessage = handler }
+        Task { @MainActor in
+            nonisolated(unsafe) self.onMessage = handler
+        }
     }
 }

@@ -4,8 +4,8 @@ import Foundation
 final class StubBackend {
     nonisolated(unsafe) private var _models: [String] = []
 
-    nonisolated func register(_ id: String) { _models.append(id) }
-    nonisolated func ready() -> [String] { _models }
+    nonisolated(unsafe) func register(_ id: String) { _models.append(id) }
+    nonisolated(unsafe) func ready() -> [String] { _models }
 
     nonisolated func dispatch(_ pd: PromptDispatchPayload, sender: @escaping (String) -> Void) {
         let stub = ["Hello", ",", " ", "simulated", " ", "response", ".", " ", "!"]
