@@ -3,13 +3,13 @@
 use std::convert::Infallible;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use futures::StreamExt;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::warn;
 use uuid::Uuid;
@@ -88,7 +88,7 @@ pub async fn chat_completions(State(state): State<AppState>, Json(body): Json<Va
     let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<RequestEvent>();
     state
         .registry
-        .register_request(request_id.clone(), event_tx);
+        .register_request(request_id.clone(), model.clone(), node_id.clone(), event_tx);
 
     let dispatch = Message::PromptDispatch(PromptDispatch {
         request_id: request_id.clone(),

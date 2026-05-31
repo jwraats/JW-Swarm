@@ -1,0 +1,37 @@
+# JW Swarm Fleet Manager — local development container
+#
+# Usage:
+#   docker build -t jw-swarm-fm:local -f Dockerfile.local .
+#   docker run --rm -p 8080:8080 -v /tmp/jw-swarm-data:/data -e RUST_LOG=debug jw-swarm-fm:local
+
+FROM rust:bookworm AS builder
+
+# Use the latest stable toolchain
+
+WORKDIR /app
+COPY Cargo.toml ./
+COPY src ./src
+COPY migrations ./migrations
+COPY config ./config
+
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && \
+    cargo install --path .
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/cargo/bin/jw-swarm-fleet-manager /usr/local/bin/
+
+WORKDIR /data
+COPY config /app/config
+
+ENV RUST_LOG=info
+ENV JW_BIND=0.0.0.0:8080
+ENV JW_DB=/data/fleet.db
+ENV JW_CATALOG=/app/config/models.toml
+
+EXPOSE 8080
+
+CMD ["jw-swarm-fleet-manager"]
