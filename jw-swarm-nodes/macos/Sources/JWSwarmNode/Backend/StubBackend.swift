@@ -1,10 +1,11 @@
 import Foundation
 
-@unchecked Sendable final class StubBackend {
-    private var models: [String] = []
+@unchecked Sendable
+class StubBackend {
+    private var _models: [String] = []
 
-    func register(_ id: String) { models.append(id) }
-    func ready() -> [String] { models }
+    nonisolated func register(_ id: String) { _models.append(id) }
+    nonisolated func ready() -> [String] { _models }
 
     func dispatch(_ pd: PromptDispatchPayload, sender: @escaping (String) -> Void) {
         let stub = ["Hello", ",", " ", "simulated", " ", "response", ".", " ", "!"]
@@ -25,7 +26,8 @@ import Foundation
         }
         guard let j = try? PayloadType.done(
             DonePayload(request_id: pd.request_id,
-                       usage: Usage(prompt_tokens: pt, completion_tokens: UInt32(stub.count),
+                       usage: Usage(prompt_tokens: pt,
+                                    completion_tokens: UInt32(stub.count),
                                     total_tokens: UInt32(Int(pt) + stub.count)))
         ).toJSON() else { return }
         sender(j)

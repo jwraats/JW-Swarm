@@ -11,10 +11,13 @@ struct JWSwarmNodeApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        Task { await NodeCoordinator.shared.start(config: ConfigManager.shared.config) }
+        Task { @MainActor in
+            await NodeCoordinator.shared.start(config: ConfigManager.shared.config)
+        }
     }
 }
 
+@unchecked Sendable
 final class NodeCoordinator: ObservableObject {
     static let shared = NodeCoordinator()
     @Published var status: String = "Disconnected"
@@ -26,29 +29,31 @@ final class NodeCoordinator: ObservableObject {
     nonisolated(unsafe) private let backend = StubBackend()
     nonisolated(unsafe) private var heartbeatTask: Task<Void, Never>?
 
-    func start(config: AppConfig) async {
+    func start(config: AppConfig) {
         self.config = config
         guard let fleetURL = URL(string: config.fleet_url) else {
-            status = "Invalid fleet URL"; return
+            DispatchQueue.main.async { self.status = "Invalid fleet URL" }; return
         }
         tunnel = Tunnel(fleetURL: fleetURL)
-        tunnel?.setIncomingHandler { @MainActor [weak self] text in
+        tunnel?.setIncomingHandler { [weak self] text in
             self?.handleInbound(text)
         }
         tunnel?.start()
-        status = "Connecting..."
-        try? await Task.sleep(nanoseconds: 500_000_000)
-        sendRegister()
-        sendCatalogRequest()
+        DispatchQueue.main.async { self.status = "Connecting..." }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.doSendRegister()
+            self?.doSendCatalogRequest()
+        }
         heartbeatTask = Task {
             while !Task.isCancelled {
-                sendHeartbeat()
+                nonisolated(unsafe) let s = Self.shared
+                s.doSendHeartbeat()
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
     }
 
-    private func sendRegister() {
+    private func doSendRegister() {
         guard let c = config, let t = tunnel else { return }
         let m = collectMetrics()
         let gpu = GpuInfo(vendor: .apple, name: "Apple Silicon", vram_mb: m.totalMB)
@@ -58,11 +63,11 @@ final class NodeCoordinator: ObservableObject {
         do {
             let json = try PayloadType.register(payload).toJSON()
             t.send(json)
-            status = "Registered"
+            DispatchQueue.main.async { self.status = "Registered" }
         } catch { NSLog("Register failed: \(error)") }
     }
 
-    private func sendCatalogRequest() {
+    private func doSendCatalogRequest() {
         guard let t = tunnel else { return }
         do {
             let json = try PayloadType.catalogRequest.toJSON()
@@ -70,22 +75,22 @@ final class NodeCoordinator: ObservableObject {
         } catch { NSLog("CatalogRequest failed: \(error)") }
     }
 
-    private func sendHeartbeat() {
+    private func doSendHeartbeat() {
         guard let c = config, let t = tunnel else { return }
         let m = collectMetrics()
         let met = NodeMetrics(vram_used_mb: m.usedMB, vram_total_mb: m.totalMB,
                               gpu_util_pct: m.gpuPct, tps: 0, latency_ms: 0, in_flight: 0)
         let hb = HeartbeatPayload(node_id: c.node_id, metrics: met,
-                                   schedule_state: isAwake ? .awake : .asleep)
+                                   schedule_state: .awake)
         do {
             let json = try PayloadType.heartbeat(hb).toJSON()
             t.send(json)
         } catch { NSLog("Heartbeat failed: \(error)") }
     }
 
-    private func updateReadyModels() {
+    private func doUpdateReadyModels() {
         let models = backend.ready()
-        readyModels = models
+        DispatchQueue.main.async { self.readyModels = models }
         guard let c = config, let t = tunnel else { return }
         let ms = ModelStatusPayload(node_id: c.node_id, ready_models: models)
         do {
@@ -94,7 +99,6 @@ final class NodeCoordinator: ObservableObject {
         } catch { NSLog("ModelStatus failed: \(error)") }
     }
 
-    @MainActor
     private func handleInbound(_ text: String) {
         guard let msg = try? PayloadType.fromJSON(text) else { return }
         switch msg {
@@ -110,19 +114,21 @@ final class NodeCoordinator: ObservableObject {
 
     private func handleCatalog(_ cr: CatalogResponsePayload) {
         let count = cr.models.count
-        status = "Catalog: \(count) models"
+        DispatchQueue.main.async { self.status = "Catalog: \(count) models" }
         let sel = config?.selected_models
         let toDownload: [CatalogModel] =
             (sel?.isEmpty == false) ? cr.models.filter { sel!.contains($0.id) } : cr.models
-        Task.detached { [weak self, toDownload] in
+        Task.detached { [toDownload] in
             for model in toDownload {
                 do {
                     try await ModelDownloader.shared.downloadModel(model)
-                    await self?.backend.register(model.id)
+                    nonisolated(unsafe) let s = Self.shared
+                    s.backend.register(model.id)
                 } catch {
                     NSLog("Download \(model.id) failed: \(error)")
                 }
-                await self?.updateReadyModels()
+                nonisolated(unsafe) let s2 = Self.shared
+                s2.doUpdateReadyModels()
             }
         }
     }
