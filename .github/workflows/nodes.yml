@@ -49,7 +49,7 @@ jobs:
       - name: Check for project
         id: check
         run: |
-          if ls jw-swarm-nodes/macos/*.xcodeproj jw-swarm-nodes/macos/Package.swift >/dev/null 2>&1; then
+          if [ -f jw-swarm-nodes/macos/Package.swift ] || ls jw-swarm-nodes/macos/*.xcodeproj >/dev/null 2>&1; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
