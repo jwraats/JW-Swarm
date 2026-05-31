@@ -7,8 +7,6 @@ use futures::{SinkExt, StreamExt};
 pub struct TunnelHandle {
     pub outbound: mpsc::UnboundedSender<String>,
     #[allow(dead_code)]
-    #[allow(dead_code)]
-    #[allow(dead_code)]
     pub shutdown: tokio_util::sync::CancellationToken,
 }
 
@@ -131,22 +129,18 @@ impl Tunnel {
 }
 
 fn build_connector(node_cert: &str, ca_cert: &str) -> Option<tokio_tungstenite::Connector> {
+    use std::io::{BufReader, Cursor};
+    
     let root_store = load_root_store(ca_cert)?;
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
 
-    let verifier = match rustls::client::WebPkiServerVerifier::builder(root_store.clone()).build() {
-        Ok(v) => v,
-        Err(e) => {
-            warn!("verifier build error: {}", e);
-            return None;
-        }
-    };
+    let config_builder = rustls::ClientConfig::builder_with_provider(provider)
+        .with_root_certificates(root_store);
 
     let cfg = if !node_cert.is_empty() {
         match std::fs::read(node_cert) {
             Ok(data) => {
-                let mut cert_reader = std::io::BufReader::new(&data[..]);
-                let chain: Vec<_> = rustls_pemfile::certs(&mut cert_reader)
-                    .into_iter()
+                let chain: Vec<_> = rustls_pemfile::certs(&mut BufReader::new(&data[..]))
                     .filter_map(|c| c.ok())
                     .collect();
                 if chain.is_empty() {
@@ -154,8 +148,7 @@ fn build_connector(node_cert: &str, ca_cert: &str) -> Option<tokio_tungstenite::
                     return None;
                 }
 
-                let mut key_reader = std::io::BufReader::new(&data[..]);
-                let key = match rustls_pemfile::private_key(&mut key_reader) {
+                let key = match rustls_pemfile::private_key(&mut BufReader::new(&data[..])) {
                     Ok(Some(k)) => k,
                     Ok(None) => {
                         warn!("no private key in {}", node_cert);
@@ -167,10 +160,7 @@ fn build_connector(node_cert: &str, ca_cert: &str) -> Option<tokio_tungstenite::
                     }
                 };
 
-                match rustls::ClientConfig::builder()
-                    .with_webpki_verifier(verifier)
-                    .with_client_auth_cert(chain, key)
-                {
+                match config_builder.with_client_auth_cert(chain, key) {
                     Ok(c) => Some(c),
                     Err(e) => {
                         warn!("client auth cert error: {}", e);
@@ -184,9 +174,7 @@ fn build_connector(node_cert: &str, ca_cert: &str) -> Option<tokio_tungstenite::
             }
         }
     } else {
-        Some(rustls::ClientConfig::builder()
-            .with_webpki_verifier(verifier)
-            .with_no_client_auth())
+        config_builder.with_no_client_auth()
     };
 
     cfg.map(|c| tokio_tungstenite::Connector::Rustls(Arc::new(c)))
@@ -198,8 +186,7 @@ fn load_root_store(ca_cert: &str) -> Option<Arc<rustls::RootCertStore>> {
     if !ca_cert.is_empty() {
         match std::fs::read(ca_cert) {
             Ok(data) => {
-                let mut reader = std::io::BufReader::new(&data[..]);
-                let certs = rustls_pemfile::certs(&mut reader);
+                let certs = rustls_pemfile::certs(&mut std::io::BufReader::new(&data[..]));
                 let mut count = 0u32;
                 for c in certs {
                     match c {
@@ -211,7 +198,7 @@ fn load_root_store(ca_cert: &str) -> Option<Arc<rustls::RootCertStore>> {
                     }
                 }
                 if count == 0 {
-                    return None;
+                    warn!("no certs in {}", ca_cert);
                 }
             }
             Err(e) => {
@@ -220,7 +207,6 @@ fn load_root_store(ca_cert: &str) -> Option<Arc<rustls::RootCertStore>> {
         }
     }
 
-    // Always add native certs as fallback
     for cert in rustls_native_certs::load_native_certs().certs {
         let _ = store.add(cert);
     }
