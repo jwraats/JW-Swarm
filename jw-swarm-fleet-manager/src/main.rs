@@ -1,7 +1,10 @@
 //! JW Swarm Fleet Manager — orchestrator binary.
 
+mod accounting;
+mod admin;
 mod api;
 mod catalog;
+mod db;
 mod proto;
 mod registry;
 mod router;
@@ -16,6 +19,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::catalog::Catalog;
+use crate::db::Db;
 use crate::state::AppState;
 
 #[tokio::main]
@@ -32,7 +36,11 @@ async fn main() -> anyhow::Result<()> {
         catalog.len()
     );
 
-    let state = AppState::new(catalog);
+    let db_path = std::env::var("JW_DB").unwrap_or_else(|_| "fleet.db".to_string());
+    let db = Db::connect(&db_path).await?;
+    info!("database connected at {db_path}");
+
+    let state = AppState::new(catalog, db);
     let app = build_router(state);
 
     let bind = std::env::var("JW_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
@@ -50,5 +58,8 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/models", get(api::list_models))
         .route("/v1/chat/completions", post(api::chat_completions))
         .route("/node/connect", get(tunnel::node_connect))
+        .route("/admin/nodes", get(admin::admin_nodes))
+        .route("/admin/nodes/:path", get(admin::admin_node_earnings))
+        .route("/admin/leaderboard", get(admin::admin_leaderboard))
         .with_state(state)
 }

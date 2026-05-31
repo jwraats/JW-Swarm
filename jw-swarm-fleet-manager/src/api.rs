@@ -88,7 +88,7 @@ pub async fn chat_completions(State(state): State<AppState>, Json(body): Json<Va
     let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel::<RequestEvent>();
     state
         .registry
-        .register_request(request_id.clone(), event_tx);
+        .register_request(request_id.clone(), model.clone(), node_id.clone(), event_tx);
 
     let dispatch = Message::PromptDispatch(PromptDispatch {
         request_id: request_id.clone(),

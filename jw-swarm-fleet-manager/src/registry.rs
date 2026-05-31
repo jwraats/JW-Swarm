@@ -35,10 +35,17 @@ impl NodeState {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct PendingMeta {
+    tx: mpsc::UnboundedSender<RequestEvent>,
+    pub(crate) model: String,
+    pub(crate) node_id: String,
+}
+
 #[derive(Default)]
 struct Inner {
     nodes: HashMap<String, NodeState>,
-    pending: HashMap<String, mpsc::UnboundedSender<RequestEvent>>,
+    pending: HashMap<String, PendingMeta>,
 }
 
 /// Shared, cloneable registry handle.
@@ -134,20 +141,24 @@ impl Registry {
             .map(|n| n.register.gpu.vendor)
     }
 
-    // --- in-flight request correlation ---
-
-    pub fn register_request(&self, request_id: String, tx: mpsc::UnboundedSender<RequestEvent>) {
-        self.inner.write().unwrap().pending.insert(request_id, tx);
+    pub fn register_request(&self, request_id: String, model: String, node_id: String, tx: mpsc::UnboundedSender<RequestEvent>) {
+        self.inner.write().unwrap().pending.insert(request_id, PendingMeta { tx, model, node_id });
     }
 
     pub fn complete_request(&self, request_id: &str) {
         self.inner.write().unwrap().pending.remove(request_id);
     }
 
-    /// Forward a node event to the waiting request handler, if any.
+    pub fn get_pending(&self, request_id: &str) -> Option<PendingMeta> {
+        self.inner.read().unwrap().pending.get(request_id).cloned()
+    }
+
     pub fn dispatch_event(&self, request_id: &str, event: RequestEvent) {
-        let inner = self.inner.read().unwrap();
-        if let Some(tx) = inner.pending.get(request_id) {
+        let tx = {
+            let inner = self.inner.read().unwrap();
+            inner.pending.get(request_id).map(|m| m.tx.clone())
+        };
+        if let Some(tx) = tx {
             let _ = tx.send(event);
         }
     }
