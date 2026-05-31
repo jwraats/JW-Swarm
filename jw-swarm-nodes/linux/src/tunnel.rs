@@ -133,7 +133,7 @@ fn build_connector(node_cert: &str, ca_cert: &str) -> Option<tokio_tungstenite::
     let provider = Arc::new(rustls::crypto::ring::default_provider());
 
     let config_builder = match rustls::ClientConfig::builder_with_provider(provider)
-        .with_protocol_versions(&[&rustls::version::TLS13])
+        .with_protocol_versions(&[&rustls::version::TLS_1_3])
     {
         Ok(cb) => cb,
         Err(e) => {
