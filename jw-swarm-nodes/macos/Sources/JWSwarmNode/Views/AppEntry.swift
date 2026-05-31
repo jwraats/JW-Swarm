@@ -18,6 +18,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 @unchecked Sendable
 final class NodeCoordinator {
     static let shared = NodeCoordinator()
+    @Published var status: String = "Disconnected"
+    @Published var readyModels: [String] = []
+    @Published var isAwake: Bool = true
     nonisolated(unsafe) private var _status: String = "Disconnected"
     nonisolated(unsafe) private var _readyModels: [String] = []
 
@@ -100,7 +103,7 @@ final class NodeCoordinator {
         } catch { NSLog("ModelStatus failed: \(error)") }
     }
 
-    nonisolated private func handleInbound(_ text: String) {
+    private func handleInbound(_ text: String) {
         guard let msg = try? PayloadType.fromJSON(text) else { return }
         switch msg {
         case .catalogResponse(let cr): handleCatalog(cr)

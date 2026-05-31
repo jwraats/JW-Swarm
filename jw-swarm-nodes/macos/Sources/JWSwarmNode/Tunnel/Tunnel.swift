@@ -2,19 +2,16 @@ import Foundation
 
 @unchecked Sendable
 final class Tunnel {
-    nonisolated private var url: URL { fleetURL }
     private let fleetURL: URL
-    nonisolated(unsafe) private var socket: URLSessionWebSocketTask?
-    nonisolated(unsafe) private var onMessage: ((String) -> Void)?
-    nonisolated(unsafe) private var backoff: Double = 1
-    nonisolated(unsafe) private var queue: [String] = []
+    var socket: URLSessionWebSocketTask? = nil
+    var onMessage: ((String) -> Void)?
+    var backoff: Double = 1
+    var queue: [String] = []
 
-    init(_ url: URL) { self.fleetURL = url }
+    init(fleetURL: URL) { self.fleetURL = fleetURL }
 
-    nonisolated func start() {
-        Task { @MainActor in
-            loop()
-        }
+    func start() {
+        Task { @MainActor in loop() }
     }
 
     @MainActor
@@ -28,7 +25,8 @@ final class Tunnel {
             while let r = try? await socket?.receive() {
                 switch r {
                 case .string(let s): onMessage?(s)
-                case .data(let d): if let s = String(data: d, encoding: .utf8) { onMessage?(s) }
+                case .data(let d):
+                    if let s = String(data: d, encoding: .utf8) { onMessage?(s) }
                 default: break
                 }
             }
@@ -41,30 +39,21 @@ final class Tunnel {
 
     @MainActor
     private func drainPending() {
-        let p = queue; queue.removeAll()
-        guard let t = socket else { queue = p; return }
-        for m in p { Task { try? await t.send(.string(m)) } }
-    }
-
-    nonisolated     nonisolated func send(_ text: String) {
-        nonisolated(unsafe) let s = socket
-        if let t = s {
-            Task { @MainActor in self._send(text) }; return
-        }
-        nonisolated(unsafe) queue.append(text)
+        let pending = queue; queue.removeAll()
+        guard let t = socket else { queue = pending; return }
+        for msg in pending { Task { @MainActor in try? await t.send(.string(msg)) } }
     }
 
     @MainActor
-    private func _send(_ text: String) {
-        if let t = socket {
-            try? t.send(.string(text)); return
-        }
+    func send(_ text: String) {
+        if let t = socket { Task { @MainActor in try? await t.send(.string(text)) }; return }
         queue.append(text)
     }
 
-    nonisolated func setIncomingHandler(_ h: @escaping (String) -> Void) {
-        nonisolated(unsafe) onMessage = h
+    @MainActor
+    func setIncomingHandler(_ handler: @escaping (String) -> Void) {
+        onMessage = handler
     }
 
-    nonisolated private func log(_ msg: String) { NSLog("[Tunnel] \(msg)") }
+    private func log(_ msg: String) { NSLog("[Tunnel] \(msg)") }
 }

@@ -1,18 +1,21 @@
 import Foundation
 
-@unchecked Sendable
 final class StubBackend {
-    nonisolated(unsafe) private var _models: [String] = []
+    private var _models: [String] = []
 
-    nonisolated func register(_ id: String) { nonisolated(unsafe) _models.append(id) }
-    nonisolated func ready() -> [String] { nonisolated(unsafe) _models }
+    @MainActor
+    func register(_ id: String) { _models.append(id) }
+    @MainActor
+    func ready() -> [String] { _models }
 
-    nonisolated func dispatch(_ pd: PromptDispatchPayload, sender: @escaping (String) -> Void) {
+    @MainActor
+    func dispatch(_ pd: PromptDispatchPayload, sender: @escaping (String) -> Void) {
         let stub = ["Hello", ",", " ", "simulated", " ", "response", ".", " ", "!"]
         var pt: UInt32 = 50
         if let rawMsgs = pd.payload["messages"]?.value as? [Any] {
             for msgAny in rawMsgs {
-                if let d = msgAny as? [String: Any], let c = d["content"] as? String {
+                if let d = msgAny as? [String: Any],
+                   let c = d["content"] as? String {
                     pt = UInt32(max(c.count / 4, 1))
                 }
             }
@@ -25,7 +28,8 @@ final class StubBackend {
         }
         guard let j = try? PayloadType.done(
             DonePayload(request_id: pd.request_id,
-                       usage: Usage(prompt_tokens: pt, completion_tokens: UInt32(stub.count),
+                       usage: Usage(prompt_tokens: pt,
+                                    completion_tokens: UInt32(stub.count),
                                     total_tokens: UInt32(Int(pt) + stub.count)))
         ).toJSON() else { return }
         sender(j)
