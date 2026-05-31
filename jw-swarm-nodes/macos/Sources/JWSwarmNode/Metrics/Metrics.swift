@@ -1,13 +1,13 @@
 import Foundation
 
+struct MetricsInfo { let totalMB: UInt64; let usedMB: UInt64; let gpuPct: Double; let name: String }
+
 func collectMetrics() -> MetricsInfo {
     let total = totalMemoryMB()
     let used  = usedMemoryMB()
     let gpu   = gpuUtilPct()
     return MetricsInfo(totalMB: total, usedMB: used, gpuPct: gpu, name: "Apple Silicon")
 }
-
-struct MetricsInfo { let totalMB: UInt64; let usedMB: UInt64; let gpuPct: Double; let name: String }
 
 private func totalMemoryMB() -> UInt64 {
     var size: size_t = 0
