@@ -10,10 +10,10 @@ final class StubBackend {
     func dispatch(_ pd: PromptDispatchPayload, sender: @escaping (String) -> Void) {
         let stub = ["Hello", ",", " ", "simulated", " ", "response", ".", " ", "!"]
         var pt: UInt32 = 50
-        if let msgs = pd.payload["messages"]?.value as? [AnyCodable] {
-            for msg in msgs {
-                if let d = msg.value as? [String: AnyCodable],
-                   let c = d["content"]?.value as? String {
+        if let rawMsgs = pd.payload["messages"]?.value as? [Any] {
+            for msgAny in rawMsgs {
+                if let d = msgAny as? [String: Any],
+                   let c = d["content"] as? String {
                     pt = UInt32(max(c.count / 4, 1))
                 }
             }
@@ -26,8 +26,7 @@ final class StubBackend {
         }
         guard let j = try? PayloadType.done(
             DonePayload(request_id: pd.request_id,
-                       usage: Usage(prompt_tokens: pt,
-                                    completion_tokens: UInt32(stub.count),
+                       usage: Usage(prompt_tokens: pt, completion_tokens: UInt32(stub.count),
                                     total_tokens: UInt32(Int(pt) + stub.count)))
         ).toJSON() else { return }
         sender(j)

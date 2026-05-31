@@ -12,6 +12,7 @@ let package = Package(
                 .linkedFramework("AppKit"),
                 .linkedFramework("SwiftUI"),
                 .linkedFramework("Security"),
+                .linkedFramework("CFNetwork"),
             ]
         ),
     ]
