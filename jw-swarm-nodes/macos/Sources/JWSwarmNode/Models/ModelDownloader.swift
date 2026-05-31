@@ -14,7 +14,9 @@ final class ModelDownloader {
                 log("\(m.id) already verified"); return
             }
         }
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
+        try FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true, attributes: nil
+        )
         let dest = dir.appendingPathComponent("weights.bin")
         log("downloading \(m.id) (\(m.size_bytes) bytes)")
         guard let url = URL(string: m.download_url) else { throw DLE.invalidURL }
@@ -53,7 +55,7 @@ struct SHA256Hasher {
     init() { CC_SHA256_Init(&ctx); ok = true }
     mutating func update(data: Data) {
         guard ok else { return }
-        data.withUnsafeBytes { CC_SHA256_Update(&ctx, $0.baseAddress, UInt32(data.count)) }
+        _ = data.withUnsafeBytes { CC_SHA256_Update(&ctx, $0.baseAddress, UInt32(data.count)) }
     }
     mutating func finalize() -> String {
         var h = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
@@ -64,10 +66,11 @@ struct SHA256Hasher {
 
 enum DLE: Error, LocalizedError {
     case invalidURL, http(Int), mismatch(expected: String, actual: String)
-    var errorDescription: String? { switch self {
-            case .invalidURL: return "Invalid URL"
-            case .http(let c): return "HTTP \(c)"
-            case .mismatch(let e, let a): return "sha256 mismatch \(e) != \(a)"
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL: return "Invalid URL"
+        case .http(let c): return "HTTP \(c)"
+        case .mismatch(let e, let a): return "sha256 mismatch \(e) != \(a)"
         }
     }
 }

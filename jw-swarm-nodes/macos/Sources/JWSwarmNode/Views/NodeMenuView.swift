@@ -14,14 +14,12 @@ struct NodeMenuView: View {
                     .font(.system(.subheadline, design: .monospaced))
                 Spacer()
             }
-
             if !coordinator.readyModels.isEmpty {
                 Text("Models: \(coordinator.readyModels.joined(separator: ", "))")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
-
             Divider()
             HStack {
                 Text("State")
