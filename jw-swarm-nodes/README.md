@@ -22,6 +22,6 @@ Each node owner configures:
 
 ## Status
 
-- `linux/` — buildable scaffold (full agent is Phase 3).
+- `linux/` — **done** (Phase 3: WSS+mTLS tunnel, config, catalog download, metrics, stub backend).
 - `macos/` — Phase 4.
 - `windows/` — Phase 5.
