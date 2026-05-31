@@ -181,7 +181,7 @@ fn build_connector(node_cert: &str, ca_cert: &str) -> Option<tokio_tungstenite::
             }
         }
     } else {
-        config_builder.with_no_client_auth()
+        Some(config_builder.with_no_client_auth())
     };
 
     cfg.map(|c| tokio_tungstenite::Connector::Rustls(Arc::new(c)))
