@@ -1,5 +1,6 @@
 import Foundation
-import Darwin
+
+@preconcurrency import Darwin
 
 final class Tunnel {
     private let fleetURL: URL
@@ -7,7 +8,7 @@ final class Tunnel {
     private var onMessage: ((String) -> Void)?
     private var backoff: TimeInterval = 1
     private var _queue: [String] = []
-    private var _lock = os_unfair_lock()
+    private let _lock = OSAllocatedUnfairLock()
 
     init(fleetURL: URL) { self.fleetURL = fleetURL }
 
@@ -41,24 +42,25 @@ final class Tunnel {
     }
 
     nonisolated func sendSync(_ text: String) {
-        nonisolated(unsafe) let sock = socket
+        let sock: URLSessionWebSocketTask?
+        sock = socket
         if let t = sock {
             Task { try? await t.send(.string(text)) }; return
         }
-        os_unfair_lock_lock(&_lock)
+        _lock.lock()
         _queue.append(text)
-        os_unfair_lock_unlock(&_lock)
+        _lock.unlock()
     }
 
     @MainActor
     private func drain() async {
-        os_unfair_lock_lock(&_lock)
-        let m = _queue; _queue.removeAll()
-        os_unfair_lock_unlock(&_lock)
+        let m: [String]
+        _lock.performWhileLocked {
+            m = self._queue
+            self._queue.removeAll()
+        }
         guard let t = socket else {
-            os_unfair_lock_lock(&_lock)
-            _queue = m; os_unfair_lock_unlock(&_lock)
-            return
+            _lock.performWhileLocked { self._queue = m }; return
         }
         for s in m { try? await t.send(.string(s)) }
     }

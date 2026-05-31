@@ -41,8 +41,8 @@ private func gpuUtilPct() -> Double {
     guard let text = String(data: data, encoding: .utf8) else { return 0 }
     var maxMHz: Double? = nil, curMHz: Double? = nil
     for line in text.split(separator: "\n") {
-        let low = lowercased(line)
-        if let n = parseNumber(line) {
+        let low = String(line).lowercased()
+        if let n = parseNumber(String(line)) {
             if low.contains("max") { maxMHz = n }
             if low.contains("current") || low.contains("freq") { curMHz = n }
         }
@@ -50,8 +50,7 @@ private func gpuUtilPct() -> Double {
     guard let c = curMHz, let m = maxMHz, m > 0 else { return 0 }
     return (c / m) * 100
 }
-private func lowercased(_ s: Slice<Substring>) -> String { s.reduce("") { $0 + $1.lowercased() } }
-private func parseNumber(_ s: Substring) -> Double? {
+private func parseNumber(_ s: String) -> Double? {
     let parts = s.split(separator: ":")
     guard parts.count >= 2, let d = Double(String(parts[1]).trimmingCharacters(in: .whitespaces).replacingOccurrences(of: " MHz", with: "").replacingOccurrences(of: "%", with: "")) else {
         return nil
