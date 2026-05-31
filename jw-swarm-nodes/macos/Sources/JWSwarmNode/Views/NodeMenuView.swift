@@ -2,25 +2,27 @@ import Foundation
 import SwiftUI
 
 struct NodeMenuView: View {
-    @ObservedObject private var coordinator = NodeCoordinator.shared
+    @State private var refresh = UUID()
     @State private var showConfig = false
+    private var c: NodeCoordinator { NodeCoordinator.shared }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: statusIcon).foregroundColor(statusColor)
-                Text(coordinator.status).font(.system(.subheadline, design: .monospaced))
+                Text(c.status).font(.system(.subheadline, design: .monospaced))
                 Spacer()
             }
-            if !coordinator.readyModels.isEmpty {
-                Text("Models: \(coordinator.readyModels.joined(separator: ", "))")
+            if !c.readyModels.isEmpty {
+                Text("Models: \(c.readyModels.joined(separator: ", "))")
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
             }
             Divider()
             HStack {
                 Text("State"); Spacer()
-                Toggle("", isOn: $coordinator.isAwake).toggleStyle(.switch).scaleEffect(0.8)
-                Text(coordinator.isAwake ? "Awake" : "Asleep").font(.caption)
+                Toggle("", isOn: Binding(get: { c.isAwake }, set: { c.isAwake = $0 }))
+                    .toggleStyle(.switch).scaleEffect(0.8)
+                Text(c.isAwake ? "Awake" : "Asleep").font(.caption)
             }
             Divider()
             Button("Configure...") { showConfig = true }
@@ -29,10 +31,17 @@ struct NodeMenuView: View {
             Button("Quit") { NSApplication.shared.terminate(nil) }
         }
         .padding().frame(width: 280)
+        .id(refresh)
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                refresh = UUID()
+            }
+        }
     }
 
     private var statusIcon: String {
-        switch coordinator.status {
+        switch c.status {
         case "Disconnected": return "wifi.slash"
         case "Connecting...": return "link"
         case "Registered": return "info.circle"
@@ -41,7 +50,7 @@ struct NodeMenuView: View {
     }
 
     private var statusColor: Color {
-        switch coordinator.status {
+        switch c.status {
         case "Disconnected": return .red
         case "Connecting...": return .orange
         case "Registered": return .yellow
