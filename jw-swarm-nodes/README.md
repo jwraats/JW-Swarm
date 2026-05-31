@@ -8,7 +8,7 @@ Nodes are **fully independent per-OS codebases** that conform to the shared prot
 | Platform | Folder | Form factor | Status | Guide |
 | -------- | ------ | ----------- | ------ | ----- |
 | Linux | [linux/](linux/) | CLI + systemd service | **done** (P3) | [linux/SETUP.md](linux/SETUP.md) |
-| macOS | [macos/](macos/) | Menu-bar app (Swift/SwiftUI) | Phase 4 | [macos/SETUP.md](macos/SETUP.md) |
+| macOS | [macos/](macos/) | Menu-bar app (Swift/SwiftUI) | **in progress** (P4) | [macos/SETUP.md](macos/SETUP.md) |
 | Windows | [windows/](windows/) | System-tray app (C#) | Phase 5 | [windows/SETUP.md](windows/SETUP.md) |
 
 ## What each node does
