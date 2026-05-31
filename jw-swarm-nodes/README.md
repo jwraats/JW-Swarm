@@ -1,27 +1,35 @@
 # JW Swarm Nodes
 
-Inference node agents for the JW Swarm fleet. Each node connects **outbound** to the Fleet Manager over a persistent WSS + mTLS tunnel, hosts the owner-selected models for its hardware, and serves inference. See the top-level [README](../README.md) and [DESIGN](../DESIGN.md) for the overall architecture.
+## Inference Nodes
 
+Each node connects **outbound** to the Fleet Manager over a persistent WSS + mTLS tunnel.
 Nodes are **fully independent per-OS codebases** that conform to the shared protocol in [proto/](../proto/):
 
-| Platform | Folder                 | Form factor                 | Backends                   | Setup                          |
-| -------- | ---------------------- | --------------------------- | -------------------------- | ------------------------------ |
-| Linux    | [linux/](linux/)       | CLI + systemd service       | vLLM (CUDA), llama.cpp (ROCm) | [linux/SETUP.md](linux/SETUP.md) |
-| macOS    | [macos/](macos/)       | Menu-bar (status item) app  | MLX                        | [macos/SETUP.md](macos/SETUP.md) |
-| Windows  | [windows/](windows/)   | System-tray app             | vLLM (CUDA), llama.cpp (ROCm) | [windows/SETUP.md](windows/SETUP.md) |
+| Platform | Folder | Form factor | Status | Guide |
+| -------- | ------ | ----------- | ------ | ----- |
+| Linux | [linux/](linux/) | CLI + systemd service | **done** (P3) | [linux/SETUP.md](linux/SETUP.md) |
+| macOS | [macos/](macos/) | Menu-bar app (Swift/SwiftUI) | Phase 4 | [macos/SETUP.md](macos/SETUP.md) |
+| Windows | [windows/](windows/) | System-tray app (C#) | Phase 5 | [windows/SETUP.md](windows/SETUP.md) |
 
-## Configuration common to all nodes
+## What each node does
 
-Each node owner configures:
+1. **Tunnel client** — outbound WSS with client certificate; auto-reconnect with exponential backoff.
+2. **Config store** — TOML file (auto-generated on first run) with JW_* environment variable overrides.
+3. **Catalog fetch + model download** — pull the vendor-resolved catalog from the Fleet Manager, download each selected model's artifact, verify `sha256`, store locally.
+4. **Metrics collector** — sample GPU/VRAM/utilization (`nvidia-smi`, `rocminfo`, etc.) every 30s via `Heartbeat`.
+5. **Backend management** — start/stop the inference backend (vLLM, llama.cpp, MLX) and serve `PromptDispatch` requests.
+6. **Inference** — for each dispatched prompt, stream tokens back as `TokenChunk` messages, then report usage in `Done`.
 
-- **Fleet URL** — `wss://<host>/node/connect`
-- **mTLS certs** — the node client cert/key + the CA cert (issued by the Fleet Manager operator; see the Fleet Manager [SETUP](../jw-swarm-fleet-manager/SETUP.md#7-mtls-certificates)).
-- **Limits** — GPU power %, memory (VRAM) reservation.
-- **Schedule** — sleep/awake windows.
-- **Models** — which catalog **aliases** to host (the node downloads the artifact matching its GPU vendor).
+### Shared configuration
 
-## Status
+Every node supports:
 
-- `linux/` — **done** (Phase 3: WSS+mTLS tunnel, config, catalog download, metrics, stub backend).
-- `macos/` — Phase 4.
-- `windows/` — Phase 5.
+- **Fleet URL** — `JW_FLEET_URL` (default: `wss://localhost/node/connect`): WSS endpoint on the HAProxy public endpoint.
+- **mTLS certificate** — `JW_NODE_CERT`: path to the PEM file containing both client cert and private key (issued by the Fleet Manager operator).
+- **CA certificate** — `JW_CA_CERT`: path to the CA public key used to verify the server.
+- **GPU power %** — `limits.gpu_power_pct` (0–100): how much GPU the node commits to the fleet.
+- **VRAM reservation** — `limits.memory_limit_mb`: how much video memory the node commits.
+- **Schedule** — `schedule.awake_from` / `awake_until`: sleep window in HH:MM format (empty = always awake).
+- **Models** — `selected_models`: list of catalog aliases; empty list means "download all for this GPU vendor".
+
+See [DESIGN](../DESIGN.md) for the full protocol specification and [linux/SETUP.md](linux/SETUP.md) for the complete Linux deployment guide.

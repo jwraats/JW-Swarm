@@ -37,196 +37,222 @@ real vLLM/llama.cpp integration).
 - Network egress to the Fleet Manager on port 443 (WSS).
 - To build from source: Rust toolchain (<https://rustup.rs>).
 
-## Install
+## 1. Install
 
 ### Option A — Debian package
+
+Download the `.deb` from the GitHub release (built by CI):
 
 ```sh
 sudo apt install ./jw-swarm-node_<version>_amd64.deb
 ```
 
-Installs to `/usr/bin/jw-swarm-node` and creates a disabled
-`jw-swarm-node.service` (see [service file](packaging/debian/jw-swarm-node.service)).
+This installs the binary to `/usr/bin/jw-swarm-node` and creates a disabled
+systemd unit `jw-swarm-node.service` (see [service file](packaging/debian/jw-swarm-node.service)).
 
 ### Option B — Build from source
 
 ```sh
+git clone https://github.com/jwraats/JW-Swarm.git
+cd JW-Swarm/jw-swarm-nodes/linux
 cargo build --release
 # binary: target/release/jw-swarm-node
 ```
 
-## Configuration
+## 2. Configure mTLS Certificates
 
-The node reads its configuration from a TOML file and can override any value
-via environment variables.
+The Fleet Manager operator must issue each node a **client certificate** and a
+**CA certificate**. See the [Fleet Manager Setup Guide](../../jw-swarm-fleet-manager/SETUP.md#7-mtls-certificates) for how to generate them.
 
-### File location
-
-| Variable       | Default path                                |
-| -------------- | ------------------------------------------- |
-| Config file    | `~/.config/jw-swarm-node/config.toml`       |
-| Data directory | `~/.local/share/jw-swarm-node/`             |
-| Model storage  | `~/.local/share/jw-swarm-node/models/`      |
-
-Override with `JW_CONFIG_DIR` and `JW_DATA_DIR` respectively.
-
-### Auto-generation
-
-On first run, if the config file does not exist, the node generates one with:
-- A new random `node_id` (UUID v4)
-- Default paths for `node_cert` and `ca_cert`
-- `memory_limit_mb = 24000`, `gpu_power_pct = 100`
-- Empty `selected_models` (means: download all catalog models for this vendor)
-
-### Config file format
-
-```toml
-fleet_url = "wss://swarm.example.com/node/connect"
-node_id = "a1b2c3d4-..."
-hostname = "gpu-node-01"
-node_cert = "/etc/jw-swarm-node/node.pem"
-ca_cert = "/etc/jw-swarm-node/ca.crt"
-
-[limits]
-gpu_power_pct = 100
-memory_limit_mb = 24000
-
-[schedule]
-awake_from = ""
-awake_until = ""
-
-selected_models = ["qwen3-coder"]
-```
-
-### Environment variables
-
-Every config field can be overridden via environment variables:
-
-| Variable        | Config key     | Example                                  |
-| --------------- | -------------- | ---------------------------------------- |
-| `JW_FLEET_URL`  | `fleet_url`    | `wss://swarm.example.com/node/connect`   |
-| `JW_NODE_CERT`  | `node_cert`    | `/etc/jw-swarm-node/node.pem`            |
-| `JW_CA_CERT`    | `ca_cert`      | `/etc/jw-swarm-node/ca.crt`              |
-| `JW_CONFIG_DIR` | _(path base)_  | `/etc/jw-swarm-node`                     |
-| `JW_DATA_DIR`   | _(path base)_  | `/var/lib/jw-swarm-node`                 |
-| `JW_FLEET_URL`  | `fleet_url`    | `wss://swarm.example.com/node/connect`   |
-| `RUST_LOG`      | _(logging)_    | `debug` or `info`                        |
-
-### mTLS certificates
-
-The `node_cert` file must contain **both** the client certificate and the
-private key in PEM format (typically concatenated, cert first, key second).
-This is the certificate issued by the Fleet Manager operator — it authenticates
-this specific node to the fleet.
+Place the certificates on the host:
 
 ```sh
 sudo mkdir -p /etc/jw-swarm-node
+
+# node.pem — the combined client cert + private key (PEM format)
 sudo cp node.pem  /etc/jw-swarm-node/node.pem
+
+# ca.crt — the CA public key that signed the cert
 sudo cp ca.crt    /etc/jw-swarm-node/ca.crt
+
+# Only the node user (or root) should be able to read the key
 sudo chmod 600 /etc/jw-swarm-node/node.pem
+sudo chmod 644 /etc/jw-swarm-node/ca.crt
 ```
+
+## 3. Configure the Node
+
+The node uses a TOML config file with environment variable overrides.
+
+### Configuration file location
+
+| File            | Default path                                  | Override env var    |
+| --------------- | --------------------------------------------- | ------------------- |
+| Config file     | `~/.config/jw-swarm-node/config.toml`         | `JW_CONFIG_DIR`     |
+| Data directory  | `~/.local/share/jw-swarm-node/`               | `JW_DATA_DIR`       |
+| Model storage   | `~/.local/share/jw-swarm-node/models/<alias>/` | _(via data dir)_    |
+
+### Auto-generation
+
+On first run, if the config file doesn't exist, the node auto-generates it:
+
+- Unique `node_id` (UUID v4)
+- Default `node_cert` / `ca_cert` paths (`/etc/jw-swarm-node/`)
+- Default limits: `gpu_power_pct = 100`, `memory_limit_mb = 24000`
+- Empty `selected_models` (= download all catalog models for this GPU vendor)
+- `fleet_url` from `JW_FLEET_URL` env var (default: `wss://localhost/node/connect`)
+
+### Environment variables
+
+| Variable        | Config key          | Purpose                                                    |
+| --------------- | ------------------- | ---------------------------------------------------------- |
+| `JW_FLEET_URL`  | `fleet_url`         | WSS endpoint of the HAProxy public entry point             |
+| `JW_NODE_CERT`  | `node_cert`         | Path to PEM file with client cert + private key            |
+| `JW_CA_CERT`    | `ca_cert`           | Path to CA certificate                                     |
+| `JW_CONFIG_DIR` | _(path base)_       | Override the config file parent directory                  |
+| `JW_DATA_DIR`   | _(path base)_       | Override the model / data storage parent directory         |
+| `RUST_LOG`      | _(logging)_         | Log level (`error`, `warn`, `info`, `debug`)               |
 
 ### Model selection
 
-- `selected_models = ["alias1", "alias2"]` — download only listed catalog aliases.
-- `selected_models = []` (empty) — download **all** models the Fleet Manager
-  resolves for this GPU vendor.
+In the config `[selected_models]` list:
 
-The node downloads each model's `weights.bin` from the vendor-specific
-`download_url`, verifies the `sha256` hash, and stores verified artifacts in
-the model directory.
+- `["qwen3-coder", "llama3-8b"]` → download only these aliases
+- `[]` (empty) → download **all** models the Fleet Manager resolves for this GPU vendor
+- Aliases must match catalog aliases defined in the Fleet Manager's `models.toml`
+
+Each model is downloaded from the vendor-specific `download_url`, verified by `sha256`, and stored in the model data directory.
 
 ### Schedule (stub)
 
-The `awake_from` / `awake_until` fields are parsed but not yet enforced.
-The node currently always reports `schedule_state = awake`. Sleep window
-enforcement is future work.
+The `schedule.awake_from` / `awake_until` fields (HH:MM format) are parsed but
+**not yet enforced**. The node currently always reports `schedule_state = awake`.
+Sleep window enforcement is future work.
 
-## Running
+## 4. Run the Node
 
-### As a systemd service
+### As a systemd service (recommended)
 
-```sh
-# Enable and start
-sudo systemctl enable --now jw-swarm-node
-
-# Check status
-systemctl status jw-swarm-node
-
-# Live logs
-journalctl -u jw-swarm-node -f
-```
-
-To override the packaged unit defaults, create a drop-in:
+Use the packaged systemd unit with a drop-in to set your environment:
 
 ```sh
 sudo systemctl edit jw-swarm-node
 ```
 
-Then add under `[Service]`:
+Add under `[Service]`:
 
 ```ini
 Environment=JW_FLEET_URL=wss://swarm.example.com/node/connect
 Environment=JW_NODE_CERT=/etc/jw-swarm-node/node.pem
 Environment=JW_CA_CERT=/etc/jw-swarm-node/ca.crt
-Environment=RUST_LOG=debug
+Environment=RUST_LOG=info
 ```
 
-### Standalone (manual run)
+Then enable and start:
+
+```sh
+sudo systemctl enable --now jw-swarm-node          # start + enable on boot
+systemctl status jw-swarm-node                     # check status
+journalctl -u jw-swarm-node -f                     # follow live logs
+```
+
+### Manual (development)
 
 ```sh
 JW_FLEET_URL=wss://swarm.example.com/node/connect \
 JW_NODE_CERT=/etc/jw-swarm-node/node.pem \
 JW_CA_CERT=/etc/jw-swarm-node/ca.crt \
-./jw-swarm-node
+RUST_LOG=debug \
+./target/release/jw-swarm-node
 ```
 
-## Lifecycle
+## 5. Verify
 
-1. **Startup** — load/generate config, detect GPU vendor, build TLS connector.
-2. **Connect** — dial WSS to Fleet Manager with mTLS; auto-reconnect on
-   failure with exponential backoff (1s → 60s cap).
-3. **Register** — send node identity, GPU info, limits, selected models.
-4. **Catalog** — request vendor-resolved catalog; download + verify each model.
-5. **Heartbeat** — every 30s send GPU metrics (`nvidia-smi` or zeroed) and
-   report `awake` schedule state.
-6. **Serve** — on `PromptDispatch` from Fleet Manager, the backend stub sends
-   ~8 tokens of simulated output followed by a `Done` message with usage stats.
-7. **Disconnect** — on close frame or error, the node backs off and reconnects.
+1. **Node starts** — look for "queued Register" in the logs.
+2. **mTLS tunnel connects** — look for "tunnel connected".
+3. **Catalog received** — look for "+N models" (N catalog entries).
+4. **Models downloaded** — look for "dl <alias> <size> bytes" followed by "<alias> verified".
+5. **Heartbeats flowing** — periodic nvidia-smi/rocminfo metrics sent every 30s.
+6. **Fleet Manager sees you** — in the FM logs, look for "node <id> registered".
+7. **Ready models reported** — FM logs show the node's ready model list.
 
-## Backend (stub)
-
-The current backend implementation simulates inference:
-
-- **Token streaming** — sends 8 fixed tokens (`Hello`, `,`, ` `, `simulated`, ` `, `response`, `.`, ` `).
-- **Usage reporting** — estimates `prompt_tokens` from message content length
-  (divided by 4), counts completion tokens from stub output.
-- **No real model loading** — model download is verified via sha256, but the
-  weights are not loaded into a real inference engine.
-
-Replacing the stub with a real backend (vLLM, llama.cpp) is the next step
-(after P4 macOS node). The `BackendManager.dispatch()` method in
-[src/backend.rs](src/backend.rs) is the integration point.
-
-## Troubleshooting
-
-| Symptom                      | Check                                                      |
-| ---------------------------- | ---------------------------------------------------------- |
-| Repeated "connect: ..."      | `JW_FLEET_URL` unreachable? TLS/mTLS cert mismatch?        |
-| "connector unavailable"      | `node_cert` or `ca_cert` missing/unreadable?               |
-| "no certificates in ..."     | PEM file malformed — must contain cert + key.              |
-| Model download fails         | `download_url` unreachable; check DNS/firewall.            |
-| sha256 mismatch              | Downloaded artifact corrupted; retry (node re-downloads).  |
-| Nothing in logs              | Set `RUST_LOG=debug` in environment.                       |
-
-Run with `RUST_LOG=debug` for verbose output:
+On the server, verify:
 
 ```sh
-RUST_LOG=debug ./jw-swarm-node
+# Does the Fleet Manager see the node?
+curl -s http://127.0.0.1:8080/admin/nodes | jq .
+
+# Leaderboard (empty until requests served)
+curl -s http://127.0.0.1:8080/admin/leaderboard | jq .
 ```
 
-## Fleet Manager
+## 6. Lifecycle
 
-The Fleet Manager operator must issue each node a client certificate. See
-the Fleet Manager [SETUP](../../jw-swarm-fleet-manager/SETUP.md) for
+```
+1. Startup    → load/generate config, detect GPU vendor
+2. Connect    → WSS + mTLS → auto-reconnect (1s → 60s exponential backoff)
+3. Register   → node identity, GPU info, limits, selected_models
+4. Catalog    → request vendor-resolved catalog from FM
+5. Download   → for each selected model: download → sha256 verify → mark ready
+6. Heartbeat  → every 30s: GPU metrics + schedule state
+7. Serve      → on PromptDispatch: stream tokens → send Done with usage
+8. Reconnect  → on close/error: backoff → reconnect → re-register
+```
+
+## 7. Backend (stub)
+
+The current backend implementation **simulates** inference. Replace this with
+a real inference engine (vLLM, llama.cpp) to produce real tokens.
+
+**Current behavior:**
+- Sends 8 fixed tokens: `Hello`, `,`, ` `, `simulated`, ` `, `response`, `.`, ` `
+- Estimates `prompt_tokens` from the dispatched message content (÷4)
+- Reports `total_tokens = prompt_tokens + completion_tokens`
+
+**Integration point:** `BackendManager.dispatch()` in
+[src/backend.rs](src/backend.rs) — replace this method to spawn a real
+inference backend and stream actual tokens.
+
+## 8. Troubleshooting
+
+| Symptom                       | Likely cause                                   | Fix                                      |
+| ----------------------------- | ---------------------------------------------- | ---------------------------------------- |
+| "connector unavailable"       | cert or CA file missing/unreadable             | Check paths + permissions (`ls -la`)     |
+| "no certificates in ..."      | PEM file malformed (no cert or key)            | Ensure cert + key are in the same file   |
+| "cannot read node/CA cert"    | Path wrong or permissions block read           | `chmod 600 node.pem`, fix env var path   |
+| "connect: ..." loop           | Fleet Manager unreachable / TLS mismatch       | Check `JW_FLEET_URL`, firewall, CA trust |
+| "protocol versions error"     | rustls unable to set TLS 1.3                  | Ensure OpenSSL / rustls support TLS 1.3  |
+| Model download fails          | `download_url` unreachable or wrong            | Check network + fleet catalog URLs       |
+| sha256 mismatch              | Downloaded artifact corrupted                  | Node auto-retries; check network quality |
+| "no certs in ca.crt"          | CA file is empty or wrong format               | Re-issue from the Fleet Manager operator |
+| Node not seen by FM           | TLS cert mismatch (node cert not trusted)      | Verify node cert was signed by FM's CA   |
+| Nothing in logs               | Log level too restrictive                      | Set `RUST_LOG=debug`                     |
+
+```sh
+# Debug output
+RUST_LOG=debug ./target/release/jw-swarm-node
+
+# Check if nvidia-smi works (for metrics collection)
+nvidia-smi
+
+# Check node config
+cat ~/.config/jw-swarm-node/config.toml
+```
+
+## 9. Uninstall
+
+### Debian package
+```sh
+sudo systemctl disable --now jw-swarm-node
+sudo apt remove jw-swarm-node
+# Optionally remove config / data:
+sudo rm -rf /etc/jw-swarm-node/
+rm -rf ~/.config/jw-swarm-node/ ~/.local/share/jw-swarm-node/
+```
+
+### Source build
+```sh
+rm -f ~/bin/jw-swarm-node
+rm -rf ~/.config/jw-swarm-node/ ~/.local/share/jw-swarm-node/
+``` [SETUP](../../jw-swarm-fleet-manager/SETUP.md) for
 certificate generation.
