@@ -141,8 +141,18 @@ impl Registry {
             .map(|n| n.register.gpu.vendor)
     }
 
-    pub fn register_request(&self, request_id: String, model: String, node_id: String, tx: mpsc::UnboundedSender<RequestEvent>) {
-        self.inner.write().unwrap().pending.insert(request_id, PendingMeta { tx, model, node_id });
+    pub fn register_request(
+        &self,
+        request_id: String,
+        model: String,
+        node_id: String,
+        tx: mpsc::UnboundedSender<RequestEvent>,
+    ) {
+        self.inner
+            .write()
+            .unwrap()
+            .pending
+            .insert(request_id, PendingMeta { tx, model, node_id });
     }
 
     pub fn complete_request(&self, request_id: &str) {

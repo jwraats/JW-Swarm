@@ -63,7 +63,7 @@ pub async fn admin_nodes(
         FROM nodes n
         LEFT JOIN node_balances nb ON n.node_id = nb.node_id
         ORDER BY n.last_seen DESC
-        "#
+        "#,
     )
     .fetch_all(&*pool)
     .await
@@ -79,8 +79,7 @@ pub async fn admin_nodes(
     };
 
     Ok(Json(
-        rows
-            .into_iter()
+        rows.into_iter()
             .map(|r| AdminNodeInfo {
                 node_id: r.try_get(0).unwrap_or_default(),
                 hostname: r.try_get(1).unwrap_or_default(),
@@ -103,22 +102,21 @@ pub async fn admin_node_earnings(
     let pool = state.db.get_pool().clone();
 
     // Fetch total balance
-    let total: Option<f64> = match sqlx::query_scalar(
-        "SELECT total_points FROM node_balances WHERE node_id = ?",
-    )
-    .bind(&node_id)
-    .fetch_optional(&*pool)
-    .await
-    {
-        Ok(row) => row,
-        Err(e) => {
-            tracing::error!("node balance query failed: {e}");
-            return Err((
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": "query failed" })),
-            ));
-        }
-    };
+    let total: Option<f64> =
+        match sqlx::query_scalar("SELECT total_points FROM node_balances WHERE node_id = ?")
+            .bind(&node_id)
+            .fetch_optional(&*pool)
+            .await
+        {
+            Ok(row) => row,
+            Err(e) => {
+                tracing::error!("node balance query failed: {e}");
+                return Err((
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "query failed" })),
+                ));
+            }
+        };
 
     // Fetch ledger entries
     let entries_raw: Vec<SqliteRow> = match sqlx::query(
@@ -151,7 +149,13 @@ pub async fn admin_node_earnings(
                 row.try_get::<String, _>(4),
             ) {
                 (Ok(id), Ok(kind), Ok(points), Ok(source_ref), Ok(created_at)) => {
-                    Some(LedgerEntry { id, kind, points, source_ref, created_at })
+                    Some(LedgerEntry {
+                        id,
+                        kind,
+                        points,
+                        source_ref,
+                        created_at,
+                    })
                 }
                 _ => None,
             }

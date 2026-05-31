@@ -6,8 +6,8 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::extract::State;
 use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
+use axum::extract::State;
 use axum::response::IntoResponse;
 use futures::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
@@ -108,7 +108,10 @@ async fn handle_message(
 ) {
     match msg {
         Message::Register(reg) => {
-            info!("node {} registered ({:?}) ({:?})", reg.node_id, reg.os, reg.gpu.vendor);
+            info!(
+                "node {} registered ({:?}) ({:?})",
+                reg.node_id, reg.os, reg.gpu.vendor
+            );
             state.registry.upsert_node(reg.clone(), tx.clone());
 
             let catalog = state.catalog.as_ref().clone();
@@ -120,7 +123,8 @@ async fn handle_message(
                 prev_heartbeat_ms: None,
                 gpu_power_pct: reg.limits.gpu_power_pct as f64,
                 vram_mb: reg.limits.memory_limit_mb as f64,
-                params_by_model: catalog.resolve_for(gpu_vendor)
+                params_by_model: catalog
+                    .resolve_for(gpu_vendor)
                     .into_iter()
                     .map(|m| (m.id, m.params_billions))
                     .collect(),
@@ -135,7 +139,10 @@ async fn handle_message(
             });
         }
         Message::CatalogRequest => {
-            match session.as_ref().and_then(|s| state.registry.node_vendor(&s.node_id)) {
+            match session
+                .as_ref()
+                .and_then(|s| state.registry.node_vendor(&s.node_id))
+            {
                 Some(vendor) => {
                     let models = state.catalog.resolve_for(vendor);
                     let _ = tx.send(Message::CatalogResponse(CatalogResponse { models }));
@@ -149,7 +156,9 @@ async fn handle_message(
             }
         }
         Message::Heartbeat(hb) => {
-            state.registry.update_metrics(&hb.node_id, hb.metrics.clone(), hb.schedule_state);
+            state
+                .registry
+                .update_metrics(&hb.node_id, hb.metrics.clone(), hb.schedule_state);
 
             if let Some(ref mut s) = session {
                 if s.node_id != hb.node_id {
@@ -161,14 +170,21 @@ async fn handle_message(
                 s.prev_heartbeat_ms = Some(now);
 
                 if delta_sec > 0.0 && hb.schedule_state == crate::proto::ScheduleStateValue::Awake {
-                    let pts = state.accounting.capacity_points(delta_sec, s.gpu_power_pct, s.vram_mb);
+                    let pts =
+                        state
+                            .accounting
+                            .capacity_points(delta_sec, s.gpu_power_pct, s.vram_mb);
                     if pts > 0.0 {
                         if let Err(e) = state.db.touch_session_awake(&s.node_id, delta_sec).await {
                             warn!("failed to touch session awake: {e}");
                         }
                         let node_id = s.node_id.clone();
                         let source = format!("hb_{:.0}", now);
-                        if let Err(e) = state.db.credit_points(&node_id, "capacity", pts, &source).await {
+                        if let Err(e) = state
+                            .db
+                            .credit_points(&node_id, "capacity", pts, &source)
+                            .await
+                        {
                             warn!("failed to credit capacity points: {e}");
                         } else {
                             info!("capacity +{pts:.1}pts for {node_id} ({delta_sec:.1}s awake)");
@@ -178,14 +194,18 @@ async fn handle_message(
             }
         }
         Message::ModelStatus(ms) => {
-            state.registry.update_ready_models(&ms.node_id, ms.ready_models);
+            state
+                .registry
+                .update_ready_models(&ms.node_id, ms.ready_models);
         }
         Message::ScheduleState(ss) => {
             state.registry.update_schedule(&ss.node_id, ss.state);
         }
         Message::TokenChunk(chunk) => {
             let req = chunk.request_id.clone();
-            state.registry.dispatch_event(&req, RequestEvent::Chunk(chunk));
+            state
+                .registry
+                .dispatch_event(&req, RequestEvent::Chunk(chunk));
         }
         Message::Done(done) => {
             let req = done.request_id.clone();
@@ -198,28 +218,44 @@ async fn handle_message(
                     .unwrap_or(7.0);
 
                 let pts = state.accounting.delivery_points(&done.usage, params);
-                info!("delivery +{pts:.1}pts for {} ({} tokens, model={})", meta.node_id, done.usage.completion_tokens, meta.model);
+                info!(
+                    "delivery +{pts:.1}pts for {} ({} tokens, model={})",
+                    meta.node_id, done.usage.completion_tokens, meta.model
+                );
 
                 let db = state.db.clone();
                 let node_id = meta.node_id.clone();
                 let model = meta.model.clone();
                 let usage = done.usage.clone();
-                let latency = match state.registry.snapshot().into_iter().find(|n| n.node_id == node_id) {
+                let latency = match state
+                    .registry
+                    .snapshot()
+                    .into_iter()
+                    .find(|n| n.node_id == node_id)
+                {
                     Some(n) => n.metrics.as_ref().map(|m| m.latency_ms).unwrap_or(0.0),
                     None => 0.0,
                 };
                 let req_delivery = req.clone();
                 tokio::spawn(async move {
-                    let _ = db.record_delivery(&req_delivery, &node_id, &model, &usage, latency).await;
-                    let _ = db.credit_points(&node_id, "delivery", pts, &req_delivery).await;
+                    let _ = db
+                        .record_delivery(&req_delivery, &node_id, &model, &usage, latency)
+                        .await;
+                    let _ = db
+                        .credit_points(&node_id, "delivery", pts, &req_delivery)
+                        .await;
                 });
             }
 
-            state.registry.dispatch_event(&req, RequestEvent::Done(done));
+            state
+                .registry
+                .dispatch_event(&req, RequestEvent::Done(done));
         }
         Message::Error(err) => {
             let rid = err.request_id.clone();
-            state.registry.dispatch_event(&rid, RequestEvent::Error(err));
+            state
+                .registry
+                .dispatch_event(&rid, RequestEvent::Error(err));
         }
         Message::CatalogResponse(_) | Message::PromptDispatch(_) => {
             warn!("ignoring server-only message received from node");

@@ -50,9 +50,6 @@ impl Accounting {
 
     /// Points earned for keeping hardware available.
     pub fn capacity_points(&self, awake_seconds: f64, gpu_power_pct: f64, vram_mb: f64) -> f64 {
-        awake_seconds
-            * (gpu_power_pct / 100.0)
-            * (vram_mb / 1024.0)
-            * self.weights.capacity
+        awake_seconds * (gpu_power_pct / 100.0) * (vram_mb / 1024.0) * self.weights.capacity
     }
 }

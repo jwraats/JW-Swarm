@@ -17,9 +17,7 @@ impl Db {
         let url = format!("sqlite://{path}");
         let pool = SqlitePool::connect(&url).await?;
 
-        sqlx::migrate!()
-            .run(&pool)
-            .await?;
+        sqlx::migrate!().run(&pool).await?;
 
         Ok(Self {
             pool: Arc::new(pool),
@@ -84,7 +82,7 @@ impl Db {
 
         sqlx::query(
             "INSERT INTO sessions (node_id, connected_at, gpu_power_pct, vram_mb)
-             VALUES (?, ?, ?, ?)"
+             VALUES (?, ?, ?, ?)",
         )
         .bind(node_id)
         .bind(&now)
@@ -106,7 +104,7 @@ impl Db {
              WHERE node_id = ?
                AND disconnected_at IS NULL
              ORDER BY connected_at DESC
-             LIMIT 1"
+             LIMIT 1",
         )
         .bind(&now)
         .bind(node_id)
@@ -127,7 +125,7 @@ impl Db {
              WHERE node_id = ?
                AND disconnected_at IS NULL
              ORDER BY connected_at DESC
-             LIMIT 1"
+             LIMIT 1",
         )
         .bind(awake_seconds_delta)
         .bind(node_id)
@@ -187,7 +185,7 @@ impl Db {
 
         sqlx::query(
             "INSERT INTO points_ledger (node_id, kind, points, source_ref, created_at)
-             VALUES (?, ?, ?, ?, ?)"
+             VALUES (?, ?, ?, ?, ?)",
         )
         .bind(node_id)
         .bind(kind)
@@ -201,7 +199,7 @@ impl Db {
             "INSERT INTO node_balances (node_id, total_points)
              VALUES (?, ?)
              ON CONFLICT(node_id) DO UPDATE SET
-                 total_points = total_points + excluded.total_points"
+                 total_points = total_points + excluded.total_points",
         )
         .bind(node_id)
         .bind(points)
