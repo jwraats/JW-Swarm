@@ -21,33 +21,32 @@ final class NodeCoordinator: ObservableObject {
     @Published var readyModels: [String] = []
     @Published var isAwake: Bool = true
 
-    private var tunnel: Tunnel?
-    private var config: AppConfig?
-    private let backend = StubBackend()
+    nonisolated var _tunnel: Tunnel? = nil
+    nonisolated var _config: AppConfig? = nil
+    private let backend: StubBackend = StubBackend()
     private var heartbeatTimer: Timer?
     nonisolated private let syncQ = DispatchQueue(label: "com.jwswarm.sync")
 
     func start(config: AppConfig) {
-        self.config = config
+        _config = config
         guard let fleetURL = URL(string: config.fleet_url) else {
-            DispatchQueue.main.async { self.status = "Invalid fleet URL" }
-            return
+            DispatchQueue.main.async { self.status = "Invalid fleet URL" }; return
         }
-        tunnel = Tunnel(fleetURL: fleetURL, certPath: config.node_cert, caPath: config.ca_cert)
-        tunnel?.setIncomingHandler { [weak self] text in self?.handleInbound(text) }
-        tunnel?.start()
+        _tunnel = Tunnel(fleetURL: fleetURL)
+        _tunnel?.setIncomingHandler { [weak self] text in self?.handleInbound(text) }
+        _tunnel?.start()
         DispatchQueue.main.async { self.status = "Connecting..." }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.syncQ.async { self?.sendRegister() }
-            self?.syncQ.async { self?.sendCatalogRequest() }
+            self?.syncQ.async { self?.doSendRegister() }
+            self?.syncQ.async { self?.doSendCatalogRequest() }
         }
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            self?.syncQ.async { self?.sendHeartbeat() }
+            self?.syncQ.async { self?.doSendHeartbeat() }
         }
     }
 
-    private func sendRegister() {
-        guard let c = config, let t = tunnel else { return }
+    nonisolated private func doSendRegister() {
+        guard let c = _config, let t = _tunnel else { return }
         let m = collectMetrics()
         let gpu = GpuInfo(vendor: .apple, name: "Apple Silicon", vram_mb: m.totalMB)
         let lim = OwnerLimits(gpu_power_pct: c.limits.gpu_power_pct, memory_limit_mb: c.limits.memory_limit_mb)
@@ -57,47 +56,39 @@ final class NodeCoordinator: ObservableObject {
             let json = try PayloadType.register(payload).toJSON()
             t.sendSync(json)
             DispatchQueue.main.async { self.status = "Registered" }
-        } catch {
-            NSLog("Register failed: \(error)")
-        }
+        } catch { NSLog("Register failed: \(error)") }
     }
 
-    private func sendCatalogRequest() {
-        guard let t = tunnel else { return }
+    nonisolated private func doSendCatalogRequest() {
+        guard let t = _tunnel else { return }
         do {
             let json = try PayloadType.catalogRequest.toJSON()
             t.sendSync(json)
-        } catch {
-            NSLog("CatalogRequest failed: \(error)")
-        }
+        } catch { NSLog("CatalogRequest failed: \(error)") }
     }
 
-    private func sendHeartbeat() {
-        guard let c = config, let t = tunnel else { return }
+    nonisolated private func doSendHeartbeat() {
+        guard let c = _config, let t = _tunnel else { return }
         let m = collectMetrics()
-        let metrics = NodeMetrics(vram_used_mb: m.usedMB, vram_total_mb: m.totalMB,
-                                   gpu_util_pct: m.gpuPct, tps: 0, latency_ms: 0, in_flight: 0)
-        let hb = HeartbeatPayload(node_id: c.node_id, metrics: metrics,
-                                   schedule_state: isAwake ? .awake : .asleep)
+        let met = NodeMetrics(vram_used_mb: m.usedMB, vram_total_mb: m.totalMB,
+                              gpu_util_pct: m.gpuPct, tps: 0, latency_ms: 0, in_flight: 0)
+        let hb = HeartbeatPayload(node_id: c.node_id, metrics: met,
+                                   schedule_state: .awake)
         do {
             let json = try PayloadType.heartbeat(hb).toJSON()
             t.sendSync(json)
-        } catch {
-            NSLog("Heartbeat failed: \(error)")
-        }
+        } catch { NSLog("Heartbeat failed: \(error)") }
     }
 
-    private func updateReadyModels() {
+    nonisolated private func doUpdateReadyModels() {
         let models = backend.ready()
         DispatchQueue.main.async { self.readyModels = models }
-        guard let c = config, let t = tunnel else { return }
+        guard let c = _config, let t = _tunnel else { return }
         let ms = ModelStatusPayload(node_id: c.node_id, ready_models: models)
         do {
             let json = try PayloadType.modelStatus(ms).toJSON()
             t.sendSync(json)
-        } catch {
-            NSLog("ModelStatus failed: \(error)")
-        }
+        } catch { NSLog("ModelStatus failed: \(error)") }
     }
 
     nonisolated private func handleInbound(_ text: String) {
@@ -105,7 +96,7 @@ final class NodeCoordinator: ObservableObject {
         switch msg {
         case .catalogResponse(let cr): handleCatalog(cr)
         case .promptDispatch(let pd):
-            backend.dispatch(pd) { [weak self] json in self?.tunnel?.sendSync(json) }
+            backend.dispatch(pd) { [weak self] json in self?._tunnel?.sendSync(json) }
         case .error(let e):
             NSLog("Server error \(e.request_id): \(e.message)")
         default: break
@@ -115,7 +106,7 @@ final class NodeCoordinator: ObservableObject {
     nonisolated private func handleCatalog(_ cr: CatalogResponsePayload) {
         let count = cr.models.count
         DispatchQueue.main.async { self.status = "Catalog: \(count) models" }
-        let sel = self.config?.selected_models
+        let sel = _config?.selected_models
         let toDownload: [CatalogModel] =
             (sel?.isEmpty == false) ? cr.models.filter { sel!.contains($0.id) } : cr.models
         Task.detached { [weak self, toDownload] in
@@ -126,7 +117,7 @@ final class NodeCoordinator: ObservableObject {
                 } catch {
                     NSLog("Download \(model.id) failed: \(error)")
                 }
-                self?.updateReadyModels()
+                self?.doUpdateReadyModels()
             }
         }
     }
