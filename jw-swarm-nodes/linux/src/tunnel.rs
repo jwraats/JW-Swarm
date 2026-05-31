@@ -129,18 +129,17 @@ impl Tunnel {
 }
 
 fn build_connector(node_cert: &str, ca_cert: &str) -> Option<tokio_tungstenite::Connector> {
-    use std::io::{BufReader, Cursor};
-    
     let root_store = load_root_store(ca_cert)?;
     let provider = Arc::new(rustls::crypto::ring::default_provider());
 
     let config_builder = rustls::ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions()
         .with_root_certificates(root_store);
 
     let cfg = if !node_cert.is_empty() {
         match std::fs::read(node_cert) {
             Ok(data) => {
-                let chain: Vec<_> = rustls_pemfile::certs(&mut BufReader::new(&data[..]))
+                let chain: Vec<_> = rustls_pemfile::certs(&mut std::io::Cursor::new(&data))
                     .filter_map(|c| c.ok())
                     .collect();
                 if chain.is_empty() {
@@ -148,7 +147,7 @@ fn build_connector(node_cert: &str, ca_cert: &str) -> Option<tokio_tungstenite::
                     return None;
                 }
 
-                let key = match rustls_pemfile::private_key(&mut BufReader::new(&data[..])) {
+                let key = match rustls_pemfile::private_key(&mut std::io::Cursor::new(&data)) {
                     Ok(Some(k)) => k,
                     Ok(None) => {
                         warn!("no private key in {}", node_cert);
@@ -186,15 +185,12 @@ fn load_root_store(ca_cert: &str) -> Option<Arc<rustls::RootCertStore>> {
     if !ca_cert.is_empty() {
         match std::fs::read(ca_cert) {
             Ok(data) => {
-                let certs = rustls_pemfile::certs(&mut std::io::BufReader::new(&data[..]));
+                let mut cursor = std::io::Cursor::new(&data);
                 let mut count = 0u32;
-                for c in certs {
+                while let c = rustls_pemfile::certs(&mut cursor).next() {
                     match c {
-                        Ok(cert) => {
-                            let _ = store.add(cert);
-                            count += 1;
-                        }
-                        Err(_) => {}
+                        Some(Ok(cert)) => { let _ = store.add(cert); count += 1; }
+                        Some(Err(_)) | None => break,
                     }
                 }
                 if count == 0 {
