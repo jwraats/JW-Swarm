@@ -1,7 +1,5 @@
 import Foundation
 
-// MARK: - Enums (match proto/schema.json)
-
 enum ScheduleStateValue: String, Codable, CaseIterable {
     case awake
     case asleep
@@ -27,108 +25,37 @@ enum Backend: String, Codable, CaseIterable {
     case mlx
 }
 
-// MARK: - Shared types
-
-struct GpuInfo: Codable {
-    let vendor: GpuVendor
-    let name: String
-    let vram_mb: UInt64
-}
-
-struct OwnerLimits: Codable {
-    var gpu_power_pct: UInt8
-    var memory_limit_mb: UInt64
-}
-
-struct NodeMetrics: Codable {
-    var vram_used_mb: UInt64
-    var vram_total_mb: UInt64
-    var gpu_util_pct: Double
-    var tps: Double
-    var latency_ms: Double
-    var in_flight: UInt32
-}
+struct GpuInfo: Codable { let vendor: GpuVendor; let name: String; let vram_mb: UInt64 }
+struct OwnerLimits: Codable { var gpu_power_pct: UInt8; var memory_limit_mb: UInt64 }
+struct NodeMetrics: Codable { var vram_used_mb: UInt64; var vram_total_mb: UInt64; var gpu_util_pct: Double; var tps: Double; var latency_ms: Double; var in_flight: UInt32 }
 
 struct CatalogModel: Codable {
-    let id: String
-    let display_name: String
-    let download_url: String
-    let sha256: String
-    let size_bytes: UInt64
-    let context_length: UInt32
-    let params_billions: Double
-    let backend: Backend
+    let id: String; let display_name: String; let download_url: String
+    let sha256: String; let size_bytes: UInt64; let context_length: UInt32
+    let params_billions: Double; let backend: Backend
 }
 
-struct Usage: Codable {
-    let prompt_tokens: UInt32
-    let completion_tokens: UInt32
-    let total_tokens: UInt32
-}
+struct Usage: Codable { let prompt_tokens: UInt32; let completion_tokens: UInt32; let total_tokens: UInt32 }
 
-// MARK: - Node -> Fleet Manager payload types
-
+// Node -> FM
 struct RegisterPayload: Codable {
-    let node_id: String
-    let hostname: String
-    let os: OsKind
-    let gpu: GpuInfo
-    let limits: OwnerLimits
-    let selected_models: [String]
+    let node_id: String; let hostname: String; let os: OsKind
+    let gpu: GpuInfo; let limits: OwnerLimits; let selected_models: [String]
 }
-
 struct CatalogRequestPayload: Codable {}
+struct HeartbeatPayload: Codable { let node_id: String; let metrics: NodeMetrics; let schedule_state: ScheduleStateValue }
+struct ModelStatusPayload: Codable { let node_id: String; let ready_models: [String] }
+struct ScheduleStatePayload: Codable { let node_id: String; let state: ScheduleStateValue }
+struct TokenChunkPayload: Codable { let request_id: String; let delta: String; let index: UInt32 }
+struct DonePayload: Codable { let request_id: String; let usage: Usage }
+struct ErrorPayload: Codable { let request_id: String; let message: String }
 
-struct HeartbeatPayload: Codable {
-    let node_id: String
-    let metrics: NodeMetrics
-    let schedule_state: ScheduleStateValue
-}
+// FM -> Node
+struct CatalogResponsePayload: Codable { let models: [CatalogModel] }
+struct PromptDispatchPayload: Codable { let request_id: String; let model: String; let payload: [String: AnyCodable] }
 
-struct ModelStatusPayload: Codable {
-    let node_id: String
-    let ready_models: [String]
-}
-
-struct ScheduleStatePayload: Codable {
-    let node_id: String
-    let state: ScheduleStateValue
-}
-
-struct TokenChunkPayload: Codable {
-    let request_id: String
-    let delta: String
-    let index: UInt32
-}
-
-struct DonePayload: Codable {
-    let request_id: String
-    let usage: Usage
-}
-
-struct ErrorPayload: Codable {
-    let request_id: String
-    let message: String
-}
-
-// MARK: - Fleet Manager -> Node payload types
-
-struct CatalogResponsePayload: Codable {
-    let models: [CatalogModel]
-}
-
-struct PromptDispatchPayload: Codable {
-    let request_id: String
-    let model: String
-    let payload: [String: AnyCodable]
-}
-
-// MARK: - Envelope
-
-struct TunnelEnvelope: Codable {
-    let type: MessageType
-    let payload: AnyCodable
-}
+// Envelope
+struct TunnelEnvelope: Codable { let type: MessageType; let payload: AnyCodable }
 
 enum MessageType: String, Codable {
     case register = "Register"
@@ -197,39 +124,27 @@ extension PayloadType {
 
     static func fromJSON(_ string: String) throws -> PayloadType {
         guard let data = string.data(using: .utf8) else {
-            throw NSError(domain: "PayloadType", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "Invalid UTF-8"])
+            throw NSError(domain: "PayloadType", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid UTF-8"])
         }
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         let env = try decoder.decode(TunnelEnvelope.self, from: data)
 
         switch env.type {
-        case .register:
-            return .register(try decodeFromAny(env.payload, RegisterPayload.self))
-        case .catalogRequest:
-            return .catalogRequest
-        case .heartbeat:
-            return .heartbeat(try decodeFromAny(env.payload, HeartbeatPayload.self))
-        case .modelStatus:
-            return .modelStatus(try decodeFromAny(env.payload, ModelStatusPayload.self))
-        case .scheduleState:
-            return .scheduleState(try decodeFromAny(env.payload, ScheduleStatePayload.self))
-        case .tokenChunk:
-            return .tokenChunk(try decodeFromAny(env.payload, TokenChunkPayload.self))
-        case .done:
-            return .done(try decodeFromAny(env.payload, DonePayload.self))
-        case .error:
-            return .error(try decodeFromAny(env.payload, ErrorPayload.self))
-        case .catalogResponse:
-            return .catalogResponse(try decodeFromAny(env.payload, CatalogResponsePayload.self))
-        case .promptDispatch:
-            return .promptDispatch(try decodeFromAny(env.payload, PromptDispatchPayload.self))
+        case .register: return .register(try decodeFromAny(env.payload, RegisterPayload.self))
+        case .catalogRequest: return .catalogRequest
+        case .heartbeat: return .heartbeat(try decodeFromAny(env.payload, HeartbeatPayload.self))
+        case .modelStatus: return .modelStatus(try decodeFromAny(env.payload, ModelStatusPayload.self))
+        case .scheduleState: return .scheduleState(try decodeFromAny(env.payload, ScheduleStatePayload.self))
+        case .tokenChunk: return .tokenChunk(try decodeFromAny(env.payload, TokenChunkPayload.self))
+        case .done: return .done(try decodeFromAny(env.payload, DonePayload.self))
+        case .error: return .error(try decodeFromAny(env.payload, ErrorPayload.self))
+        case .catalogResponse: return .catalogResponse(try decodeFromAny(env.payload, CatalogResponsePayload.self))
+        case .promptDispatch: return .promptDispatch(try decodeFromAny(env.payload, PromptDispatchPayload.self))
         }
     }
 }
 
-// Decode AnyCodable.value back to a Codable struct (re-encode then decode)
 func decodeFromAny<T: Codable>(_ any: AnyCodable, _ type: T.Type) throws -> T {
     let encoder = JSONEncoder()
     encoder.keyEncodingStrategy = .convertToSnakeCase
@@ -239,7 +154,7 @@ func decodeFromAny<T: Codable>(_ any: AnyCodable, _ type: T.Type) throws -> T {
     return try decoder.decode(T.self, from: data)
 }
 
-// MARK: - AnyCodable (for PromptDispatch.payload)
+// MARK: - AnyCodable
 
 struct AnyCodable: Codable {
     let value: Any
@@ -267,11 +182,12 @@ struct AnyCodable: Codable {
         var container = encoder.singleValueContainer()
         if let v = value as? Bool { try container.encode(v) }
         else if let v = value as? Int { try container.encode(v) }
-        else if let v = value as? Int64 { try container.encode(Double(truncating: v)) }
-        else if let v = value as? UInt64 { try container.encode(Double(truncating: v)) }
-        else if let v = value as? UInt8 { try container.encode(Int(exactly: v) ?? 0) }
-        else if let v = value as? UInt32 { try container.encode(Int(exactly: v) ?? 0) }
-        else if let v = value as? Int32 { try container.encode(Int(exactly: v) ?? 0) }
+        else if let v = value as? Int32 { try container.encode(Int(v)) }
+        else if let v = value as? Int64 { try container.encode(Double(v)) }
+        else if let v = value as? UInt8 { try container.encode(Int(v)) }
+        else if let v = value as? UInt16 { try container.encode(Int(v)) }
+        else if let v = value as? UInt32 { try container.encode(Int(v)) }
+        else if let v = value as? UInt64 { try container.encode(Double(v)) }
         else if let v = value as? Float { try container.encode(Double(v)) }
         else if let v = value as? Double { try container.encode(v) }
         else if let v = value as? String { try container.encode(v) }

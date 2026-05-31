@@ -7,7 +7,13 @@ struct NodeMenuView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            statusRow
+            HStack {
+                Image(systemName: statusIcon)
+                    .foregroundColor(statusColor)
+                Text(coordinator.status)
+                    .font(.system(.subheadline, design: .monospaced))
+                Spacer()
+            }
 
             if !coordinator.readyModels.isEmpty {
                 Text("Models: \(coordinator.readyModels.joined(separator: ", "))")
@@ -17,43 +23,23 @@ struct NodeMenuView: View {
             }
 
             Divider()
-            awakeRow
+            HStack {
+                Text("State")
+                Spacer()
+                Toggle("", isOn: $coordinator.isAwake)
+                    .toggleStyle(.switch)
+                    .scaleEffect(0.8)
+                Text(coordinator.isAwake ? "Awake" : "Asleep")
+                    .font(.caption)
+            }
             Divider()
-            Button("Configure...") {
-                showConfig = true
-            }
-            .sheet(isPresented: $showConfig) {
-                ConfigPopoverView()
-            }
+            Button("Configure...") { showConfig = true }
+                .sheet(isPresented: $showConfig) { ConfigPopoverView() }
             Divider()
-            Button("Quit") {
-                NSApplication.shared.terminate(nil)
-            }
+            Button("Quit") { NSApplication.shared.terminate(nil) }
         }
         .padding()
         .frame(width: 280)
-    }
-
-    private var statusRow: some View {
-        HStack {
-            Image(systemName: statusIcon)
-                .foregroundColor(statusColor)
-            Text(coordinator.status)
-                .font(.system(.subheadline, design: .monospaced))
-            Spacer()
-        }
-    }
-
-    private var awakeRow: some View {
-        HStack {
-            Text("State")
-            Spacer()
-            Toggle("", isOn: $coordinator.isAwake)
-                .toggleStyle(.switch)
-                .scaleEffect(0.8)
-            Text(coordinator.isAwake ? "Awake" : "Asleep")
-                .font(.caption)
-        }
     }
 
     private var statusIcon: String {
@@ -89,7 +75,8 @@ struct ConfigPopoverView: View {
                 Slider(value: $vm.gpuPower, in: 0...100) {
                     Text("GPU: \(Int(vm.gpuPower))%")
                 }
-                Stepper("\(vm.memoryLimit) MB", value: $vm.memoryLimit, in: 1024...65536, step: 1024)
+                Stepper("\(vm.memoryLimit) MB",
+                        value: $vm.memoryLimit, in: 1024...65536, step: 1024)
             }
             Section("") {
                 Button("Save & Restart") {
@@ -99,7 +86,7 @@ struct ConfigPopoverView: View {
                 .buttonStyle(.borderedProminent)
             }
         }
-        .frame(width: 350, height: 280)
+        .frame(width: 350, height: 250)
     }
 }
 
@@ -112,18 +99,14 @@ class ConfigViewModel: ObservableObject {
 
     init() {
         let c = ConfigManager.shared.config
-        fleetURL = c.fleet_url
-        certPath = c.node_cert
-        caPath = c.ca_cert
+        fleetURL = c.fleet_url; certPath = c.node_cert; caPath = c.ca_cert
         gpuPower = Double(c.limits.gpu_power_pct)
         memoryLimit = Int(c.limits.memory_limit_mb)
     }
 
     func save() {
         var c = ConfigManager.shared.config
-        c.fleet_url = fleetURL
-        c.node_cert = certPath
-        c.ca_cert = caPath
+        c.fleet_url = fleetURL; c.node_cert = certPath; c.ca_cert = caPath
         c.limits.gpu_power_pct = UInt8(gpuPower)
         c.limits.memory_limit_mb = UInt64(memoryLimit)
         ConfigManager.shared.save(c)

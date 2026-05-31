@@ -1,194 +1,112 @@
 import Foundation
 import Security
 
-class Tunnel {
+final class Tunnel {
     private let fleetURL: URL
-    private let nodeCertPath: String
-    private let caCertPath: String
-
-    private var task: URLSessionWebSocketTask?
-    private var incomingHandler: ((String) -> Void)?
-    private var backoff: TimeInterval = 1.0
+    private let certPath: String
+    private let caPath: String
+    private var socket: URLSessionWebSocketTask?
+    private var onMessage: ((String) -> Void)?
+    private var backoff: TimeInterval = 1
     private var queue: [String] = []
-    private let queueLock = NSLock()
+    private let lock = NSLock()
 
-    init(fleetURL: URL, nodeCertPath: String, caCertPath: String) {
-        self.fleetURL = fleetURL
-        self.nodeCertPath = nodeCertPath
-        self.caCertPath = caCertPath
+    init(fleetURL: URL, certPath: String, caPath: String) {
+        self.fleetURL = fleetURL; self.certPath = certPath; self.caPath = caPath
     }
 
-    func start() {
-        Task {
-            await connectLoop()
-        }
-    }
+    func start() { Task { @MainActor in await loop() } }
 
     @MainActor
-    private func connectLoop() async {
-        while true {
-            guard let session = buildSession() else {
-                log("TLS unavailable, retry in \(backoff)s")
-                try? await Task.sleep(for: .seconds(backoff))
-                backoff = min(backoff * 2, 60)
-                continue
+    private func loop() async {
+        while !Task.isCancelled {
+            guard let sess = makeSession() else {
+                log("TLS unavailable; retry in \(backoff)"); try? await sleep(backoff); backoff = min(backoff*2, 60); continue
             }
-
-            task = session.webSocketTask(with: fleetURL)
-            task?.resume()
-            log("tunnel connected")
-            backoff = 1.0
-
-            // Drain any queued messages
-            await drainQueue()
-
-            // Read loop
-            do {
-                while let out = try await receiveOne(), let task = task {
-                    if let text = String(data: out, encoding: .utf8) {
-                        incomingHandler?(text)
-                    }
+            let t = sess.webSocketTask(with: fleetURL); t.resume(); socket = t
+            log("connected"); backoff = 1; drain()
+            while let r = try? await socket?.receive() { switch r {
+                    case .string(let s): onMessage?(s)
+                    case .data(let d): if let s = String(data: d, encoding: .utf8) { onMessage?(s) }
+                    case .close: break
+                    @unknown default: break
                 }
-            } catch {
-                log("read error: \(error.localizedDescription)")
             }
-
-            task = nil
-            log("disconnected, retry in \(backoff)s")
-            try? await Task.sleep(for: .seconds(backoff))
-            backoff = min(backoff * 2, 60)
+            socket?.cancel(); socket = nil
+            log("disconnected; retry in \(backoff)"); try? await sleep(backoff); backoff = min(backoff*2, 60)
         }
     }
 
-    private func receiveOne() async throws -> Data? {
-        guard let task = task else { return nil }
-        let msg = try await task.receive()
-        if case .data(let d) = msg { return d }
-        if case .string(let s) = msg { return Data(s.utf8) }
-        return nil
+    private func sleep(_ seconds: TimeInterval) async throws {
+        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
     }
 
     @MainActor
-    private func drainQueue() {
-        queueLock.lock()
-        let messages = queue
-        queue.removeAll()
-        queueLock.unlock()
-
-        guard let task = task else {
-            queueLock.lock()
-            queue = messages
-            queueLock.unlock()
-            return
+    private func makeSession() -> URLSession? {
+        let c = URLSessionConfiguration.default
+        if !certPath.isEmpty, let ident = identityAt(certPath) {
+            if #available(macOS 15.0, *) {
+                c.tlsIdentities = [ident]
+            } else {
+                var sslDict: NSDictionary = [:]
+                sslDict[kCFStreamSSLCertArray as String] = [ident] as CFArray
+                c.connectionProxyDictionary = sslDict
+            }
         }
-
-        for m in messages {
-            task.send(.string(m), completionHandler: nil)
-        }
+        if !caPath.isEmpty { c.connectionProxyDictionary = caDict() }
+        return URLSession(configuration: c)
     }
 
+    private func caDict() -> NSDictionary {
+        var d: NSDictionary = [:]
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: caPath)),
+           let cert = SecCertificateCreateWithData(nil, data as CFData) {
+            d = [kCFStreamSSLCertArray as String: [cert] as CFArray]
+        }
+        return d
+    }
+
+    @MainActor
     func send(_ text: String) {
-        if let task = task {
-            task.send(.string(text), completionHandler: nil)
-            return
-        }
-        queueLock.lock()
-        queue.append(text)
-        queueLock.unlock()
-    }
-
-    func setIncomingHandler(_ handler: @escaping (String) -> Void) {
-        incomingHandler = handler
+        if let t = socket { try? t.send(.string(text)); return }
+        lock.lock(); queue.append(text); lock.unlock()
     }
 
     @MainActor
-    private func buildSession() -> URLSession? {
-        let config = URLSessionConfiguration.default
-        config.tlsMinimumSupportedProtocol = .tlsV13
-
-        if !nodeCertPath.isEmpty {
-            guard let identity = identityFromPEM(nodeCertPath) else {
-                log("load identity failed")
-                return nil
-            }
-            config.tlsIdentities = [identity]
-        }
-
-        return URLSession(configuration: config)
+    private func drain() {
+        lock.lock(); let m = queue; queue.removeAll(); lock.unlock()
+        guard let t = socket else { lock.lock(); queue = m; lock.unlock(); return }
+        for s in m { try? t.send(.string(s)) }
     }
 
-    private func identityFromPEM(_ path: String) -> SecIdentity? {
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
-            return nil
-        }
-        return pemToIdentity(data)
+    func setIncomingHandler(_ handler: @escaping (String) -> Void) { onMessage = handler }
+
+    // ---------- PEM -> SecIdentity ----------
+
+    private func identityAt(_ path: String) -> SecIdentity? {
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        let lines = String(data: data, encoding: .utf8)?.components(separatedBy: "\n") ?? []
+        guard let certData = pemBlock(lines, tag: "CERTIFICATE"),
+              let keyData  = pemBlock(lines, tag: "PRIVATE") else { return nil }
+        guard let cert = SecCertificateCreateWithData(nil, certData as CFData) else { return nil }
+        guard let key  = SecKeyCreateWithData(keyData as CFData,
+                    [kSecAttrIsPermanent: false as CFBoolean] as CFDictionary,
+                    nil) else { return nil }
+        var ident: SecIdentity?
+        guard SecIdentityCreate(cert, key, &ident) == noErr else { return nil }
+        return ident
     }
 
-    private func pemToIdentity(_ data: Data) -> SecIdentity? {
-        guard let text = String(data: data, encoding: .utf8) else { return nil }
-        let lines = text.components(separatedBy: .newlines)
-
-        var certLines: [String] = []
-        var inCert = false
+    private func pemBlock(_ lines: [String], tag: String) -> Data? {
+        var r: [String] = []; var on = false
         for line in lines {
             let t = line.trimmingCharacters(in: .whitespaces)
-            if t == "-----BEGIN CERTIFICATE-----" {
-                inCert = true
-                certLines.append(t)
-            } else if t == "-----END CERTIFICATE-----" {
-                certLines.append(t)
-                break
-            } else if inCert {
-                certLines.append(t)
-            }
+            if !on && t == "-----BEGIN \(tag)-----" { on = true; r.append(t) }
+            else if on && t.hasPrefix("-----END") && t.contains(tag) { r.append(t); break }
+            else if on { r.append(t) }
         }
-
-        let certData = Data((certLines.joined(separator: "\n") + "\n").utf8)
-        guard let cert = SecCertificateCreateWithData(nil, certData as CFData) else {
-            return nil
-        }
-
-        var keyLines: [String] = []
-        var inKey = false
-        for line in lines {
-            let t = line.trimmingCharacters(in: .whitespaces)
-            if t.hasPrefix("-----BEGIN") && (t.contains("PRIVATE KEY") || t.contains("EC PRIVATE")) {
-                inKey = true
-                keyLines.append(t)
-            } else if t.contains("END") && t.contains("PRIVATE KEY") {
-                keyLines.append(t)
-                break
-            } else if inKey {
-                keyLines.append(t)
-            }
-        }
-
-        guard !keyLines.isEmpty else { return nil }
-        let keyData = Data((keyLines.joined(separator: "\n") + "\n").utf8)
-
-        let attr: NSDictionary = [kSecAttrIsTemporary: NSNumber(booleanLiteral: true)]
-        var key: SecKey?
-        guard SecKeyImport(keyData as CFData, attr as CFDictionary, &key) == noErr,
-              let key = key else {
-            return nil
-        }
-
-        var identity: SecIdentity?
-        guard SecIdentityCreate(cert, key, &identity) == noErr else {
-            return nil
-        }
-        return identity
+        return !r.isEmpty ? Data((r.joined(separator: "\n") + "\n").utf8) : nil
     }
 
-    private func log(_ msg: String) {
-        NSLog("[Tunnel] \(msg)")
-    }
-}
-
-// MARK: - Duration extension
-
-extension Duration {
-    static func seconds(_ value: TimeInterval) -> Duration {
-        return Duration.nanoseconds(UInt64(value * 1_000_000_000))
-    }
+    private func log(_ m: String) { NSLog("[Tunnel] \(m)") }
 }

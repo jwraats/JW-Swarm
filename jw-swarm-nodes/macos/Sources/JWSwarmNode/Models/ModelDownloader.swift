@@ -1,103 +1,73 @@
 import Foundation
 import CommonCrypto
 
-class ModelDownloader {
+final class ModelDownloader {
     static let shared = ModelDownloader()
-    private let session = URLSession(configuration: .default)
+    private let session = URLSession.shared
 
-    func download(_ model: CatalogModel) async throws {
-        let dir = ConfigManager.shared.modelDir().appendingPathComponent(model.id)
+    func downloadModel(_ m: CatalogModel) async throws {
+        let dir = ConfigManager.shared.modelDir().appendingPathComponent(m.id)
         let shaPath = dir.appendingPathComponent("sha256")
-
-        // Already verified?
         if FileManager.default.fileExists(atPath: shaPath.path) {
             if let existing = try? String(contentsOf: shaPath),
-               existing.trimmingCharacters(in: .whitespacesAndNewlines) == model.sha256 {
-                log("\(model.id) already verified")
-                return
+               existing.trimmingCharacters(in: .whitespacesAndNewlines) == m.sha256 {
+                log("\(m.id) already verified"); return
             }
         }
-
-        try FileManager.default.createDirectory(
-            at: dir, withIntermediateDirectories: true, attributes: nil
-        )
-
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
         let dest = dir.appendingPathComponent("weights.bin")
-        log("downloading \(model.id) (\(model.size_bytes) bytes)")
-
-        guard let url = URL(string: model.download_url) else {
-            throw DownloadError.invalidURL
+        log("downloading \(m.id) (\(m.size_bytes) bytes)")
+        guard let url = URL(string: m.download_url) else { throw DLE.invalidURL }
+        let (tu, resp) = try await session.download(from: url)
+        guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
+            try? FileManager.default.removeItem(at: tu)
+            throw DLE.http((resp as? HTTPURLResponse)?.statusCode ?? -1)
         }
-
-        let (tempURL, response) = try await session.download(from: url)
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            try? FileManager.default.removeItem(at: tempURL)
-            throw DownloadError.httpStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
+        let hash = try sha256(at: tu)
+        guard hash.lowercased() == m.sha256.lowercased() else {
+            try? FileManager.default.removeItem(at: tu)
+            throw DLE.mismatch(expected: m.sha256, actual: hash)
         }
-
-        let hash = try sha256File(at: tempURL)
-        guard hash.lowercased() == model.sha256.lowercased() else {
-            try? FileManager.default.removeItem(at: tempURL)
-            throw DownloadError.mismatch(expected: model.sha256, actual: hash)
-        }
-
-        try FileManager.default.moveItem(from: tempURL, to: dest)
-        try model.sha256.write(to: shaPath, atomically: true, encoding: .utf8)
-        log("\(model.id) verified")
+        try FileManager.default.moveItem(at: tu, to: dest)
+        try m.sha256.write(to: shaPath, atomically: true, encoding: .utf8)
+        log("\(m.id) verified")
     }
 
-    private func sha256File(at url: URL) throws -> String {
-        let file = try FileHandle(forReadingFrom: url)
-        var hasher = SHA256Hasher()
+    private func sha256(at url: URL) throws -> String {
+        let fh = try FileHandle(forReadingFrom: url)
+        var h = SHA256Hasher()
         while true {
-            let chunk = try file.read(upToCount: 8192)
-            guard !chunk.isEmpty else { break }
-            hasher.update(data: chunk)
+            let chunk = try fh.read(upToCount: 8192)
+            guard let d = chunk, !d.isEmpty else { break }
+            h.update(data: d)
         }
-        return hasher.finalize()
+        return h.finalize()
     }
 
-    private func log(_ msg: String) {
-        NSLog("[Models] \(msg)")
-    }
+    private func log(_ m: String) { NSLog("[Models] \(m)") }
 }
 
-class SHA256Hasher {
+struct SHA256Hasher {
     private var ctx = CC_SHA256_CTX()
-    private var ready = false
-
-    init() {
-        CC_SHA256_Init(&ctx)
-        ready = true
+    private var ok = false
+    init() { CC_SHA256_Init(&ctx); ok = true }
+    mutating func update(data: Data) {
+        guard ok else { return }
+        data.withUnsafeBytes { CC_SHA256_Update(&ctx, $0.baseAddress, UInt32(data.count)) }
     }
-
-    func update(data: Data) {
-        guard ready else { return }
-        data.withUnsafeBytes { ptr in
-            guard let base = ptr.baseAddress else { return }
-            CC_SHA256_Update(&ctx, base, UInt32(data.count))
-        }
-    }
-
-    func finalize() -> String {
-        var hash = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
-        CC_SHA256_Final(&hash, &ctx)
-        ready = false
-        return hash.map { String(format: "%02x", $0) }.joined()
+    mutating func finalize() -> String {
+        var h = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        CC_SHA256_Final(&h, &ctx); ok = false
+        return h.map { String(format: "%02x", $0) }.joined()
     }
 }
 
-enum DownloadError: Error, LocalizedError {
-    case invalidURL
-    case httpStatus(Int)
-    case mismatch(expected: String, actual: String)
-
-    var errorDescription: String? {
-        switch self {
-        case .invalidURL: return "Invalid URL"
-        case .httpStatus(let code): return "HTTP \(code)"
-        case .mismatch(let exp, let act): return "sha256 mismatch: \(exp) != \(act)"
+enum DLE: Error, LocalizedError {
+    case invalidURL, http(Int), mismatch(expected: String, actual: String)
+    var errorDescription: String? { switch self {
+            case .invalidURL: return "Invalid URL"
+            case .http(let c): return "HTTP \(c)"
+            case .mismatch(let e, let a): return "sha256 mismatch \(e) != \(a)"
         }
     }
 }
