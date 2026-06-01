@@ -5,6 +5,8 @@
 # Build / packaging
 *.deb
 dist/
+**/.build/
+**/.swiftpm/
 
 # Logs
 *.log
