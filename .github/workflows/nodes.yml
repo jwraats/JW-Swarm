@@ -79,6 +79,14 @@ jobs:
             cp "$RELEASE_BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
             chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
+            # Copy SwiftPM-generated resource bundle(s) (menu-bar icon, etc.)
+            # into Resources so Bundle.module can find them at runtime.
+            RELEASE_DIR=$(dirname "$RELEASE_BIN")
+            for b in "$RELEASE_DIR"/*.bundle; do
+              [ -e "$b" ] || continue
+              cp -R "$b" "$APP_BUNDLE/Contents/Resources/"
+            done
+
             printf '%s\n' \
               '<?xml version="1.0" encoding="UTF-8"?>' \
               '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \

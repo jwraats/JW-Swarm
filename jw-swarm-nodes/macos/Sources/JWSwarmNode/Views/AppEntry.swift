@@ -1,16 +1,26 @@
 import AppKit
 import Foundation
-import SwiftUI
 
+// Pure AppKit entry point. A menu-bar-only agent works far more reliably with a
+// plain NSApplication run loop than with the SwiftUI `App`/`Settings` scene,
+// especially when launched as a bare binary via `swift run` (no app bundle or
+// Info.plist). This guarantees the status-bar menu is created and interactive.
 @main
-struct JWSwarmNodeApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    var body: some Scene {
-        Settings { EmptyView() }
+enum JWSwarmNodeMain {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        // Retain the delegate for the lifetime of the process.
+        app.delegate = delegate
+        AppDelegate.retained = delegate
+        app.setActivationPolicy(.accessory)
+        app.run()
     }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    static var retained: AppDelegate?
+
     private var statusItem: NSStatusItem?
     private var refreshTimer: Timer?
 
@@ -42,9 +52,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = item
 
         if let button = item.button {
-            button.title = "JW Swarm"
-            button.image = NSImage(systemSymbolName: "network", accessibilityDescription: "JW Swarm")
-            button.imagePosition = .imageLeading
+            if let icon = Self.menuBarIcon() {
+                button.image = icon
+                button.imagePosition = .imageOnly
+            } else {
+                // Fallback so the item is never invisible if the asset is missing.
+                button.title = "JW Swarm"
+            }
         }
 
         let menu = NSMenu()
@@ -71,6 +85,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(quit)
 
         item.menu = menu
+    }
+
+    /// Loads the menu-bar icon and configures it as a template image so macOS
+    /// tints it correctly for light/dark menu bars. Sized to standard menu-bar
+    /// height (~18pt).
+    private static func menuBarIcon() -> NSImage? {
+        guard let url = Bundle.module.url(forResource: "JWMenuBar", withExtension: "svg"),
+              let image = NSImage(contentsOf: url) else {
+            return nil
+        }
+        let target: CGFloat = 18
+        let aspect = image.size.height > 0 ? image.size.width / image.size.height : 1
+        image.size = NSSize(width: target * aspect, height: target)
+        image.isTemplate = true
+        return image
     }
 
     private func updateMenuState() {
@@ -128,7 +157,7 @@ class NodeCoordinator: @unchecked Sendable {
         }
         self.tunnel?.startLoop()
         self.status = "Connecting..."
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) {
             NodeCoordinator.shared.doSendRegister()
             NodeCoordinator.shared.doSendCatalogRequest()
         }
