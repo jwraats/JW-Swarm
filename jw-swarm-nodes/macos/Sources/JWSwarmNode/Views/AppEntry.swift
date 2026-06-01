@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -5,14 +6,100 @@ import SwiftUI
 struct JWSwarmNodeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
-        MenuBarExtra("JW Swarm", systemImage: "network") { NodeMenuView() }
-            .menuBarExtraStyle(.menu)
+        Settings { EmptyView() }
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private var statusItem: NSStatusItem?
+    private var refreshTimer: Timer?
+
+    private let statusMenuItem = NSMenuItem(title: "Status: Starting...", action: nil, keyEquivalent: "")
+    private let modelsMenuItem = NSMenuItem(title: "Models: -", action: nil, keyEquivalent: "")
+    private let awakeMenuItem = NSMenuItem(title: "Awake", action: #selector(toggleAwake), keyEquivalent: "")
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setupStatusItem()
         NodeCoordinator.shared.start(config: ConfigManager.shared.config)
+
+        // Keep menu labels in sync with runtime state.
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateMenuState()
+        }
+        updateMenuState()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        refreshTimer?.invalidate()
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        updateMenuState()
+    }
+
+    private func setupStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = item
+
+        if let button = item.button {
+            button.title = "JW Swarm"
+            button.image = NSImage(systemSymbolName: "network", accessibilityDescription: "JW Swarm")
+            button.imagePosition = .imageLeading
+        }
+
+        let menu = NSMenu()
+        menu.delegate = self
+
+        statusMenuItem.isEnabled = false
+        modelsMenuItem.isEnabled = false
+
+        awakeMenuItem.target = self
+        awakeMenuItem.state = .on
+
+        let openConfig = NSMenuItem(title: "Open Config Folder", action: #selector(openConfigFolder), keyEquivalent: "")
+        openConfig.target = self
+
+        let quit = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
+        quit.target = self
+
+        menu.addItem(statusMenuItem)
+        menu.addItem(modelsMenuItem)
+        menu.addItem(.separator())
+        menu.addItem(awakeMenuItem)
+        menu.addItem(openConfig)
+        menu.addItem(.separator())
+        menu.addItem(quit)
+
+        item.menu = menu
+    }
+
+    private func updateMenuState() {
+        let coordinator = NodeCoordinator.shared
+        statusMenuItem.title = "Status: \(coordinator.status)"
+        if coordinator.readyModels.isEmpty {
+            modelsMenuItem.title = "Models: -"
+        } else {
+            modelsMenuItem.title = "Models: \(coordinator.readyModels.joined(separator: ", "))"
+        }
+        awakeMenuItem.state = coordinator.isAwake ? .on : .off
+    }
+
+    @objc
+    private func toggleAwake() {
+        NodeCoordinator.shared.isAwake.toggle()
+        updateMenuState()
+    }
+
+    @objc
+    private func openConfigFolder() {
+        let dir = ConfigManager.shared.dataDir()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(dir)
+    }
+
+    @objc
+    private func quitApp() {
+        NSApplication.shared.terminate(nil)
     }
 }
 
