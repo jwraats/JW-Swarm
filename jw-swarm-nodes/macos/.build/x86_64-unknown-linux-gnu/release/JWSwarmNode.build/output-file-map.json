@@ -1,0 +1,55 @@
+{
+  "": {
+    "dependencies": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/JWSwarmNode.d",
+    "object": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/JWSwarmNode.o",
+    "swift-dependencies": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/primary.swiftdeps"
+  },
+  "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/Sources/JWSwarmNode/Backend/StubBackend.swift": {
+    "object": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/StubBackend.swift.o",
+    "swiftmodule": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/StubBackend~partial.swiftmodule",
+    "swift-dependencies": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/StubBackend.swiftdeps",
+    "diagnostics": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/StubBackend.dia"
+  },
+  "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/Sources/JWSwarmNode/Config/ConfigManager.swift": {
+    "object": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/ConfigManager.swift.o",
+    "swiftmodule": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/ConfigManager~partial.swiftmodule",
+    "swift-dependencies": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/ConfigManager.swiftdeps",
+    "diagnostics": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/ConfigManager.dia"
+  },
+  "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/Sources/JWSwarmNode/Metrics/Metrics.swift": {
+    "object": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/Metrics.swift.o",
+    "swiftmodule": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/Metrics~partial.swiftmodule",
+    "swift-dependencies": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/Metrics.swiftdeps",
+    "diagnostics": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/Metrics.dia"
+  },
+  "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/Sources/JWSwarmNode/Models/ModelDownloader.swift": {
+    "object": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/ModelDownloader.swift.o",
+    "swiftmodule": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/ModelDownloader~partial.swiftmodule",
+    "swift-dependencies": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/ModelDownloader.swiftdeps",
+    "diagnostics": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/ModelDownloader.dia"
+  },
+  "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/Sources/JWSwarmNode/Proto/Types.swift": {
+    "object": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/Types.swift.o",
+    "swiftmodule": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/Types~partial.swiftmodule",
+    "swift-dependencies": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/Types.swiftdeps",
+    "diagnostics": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/Types.dia"
+  },
+  "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/Sources/JWSwarmNode/Tunnel/Tunnel.swift": {
+    "object": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/Tunnel.swift.o",
+    "swiftmodule": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/Tunnel~partial.swiftmodule",
+    "swift-dependencies": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/Tunnel.swiftdeps",
+    "diagnostics": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/Tunnel.dia"
+  },
+  "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/Sources/JWSwarmNode/Views/AppEntry.swift": {
+    "object": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/AppEntry.swift.o",
+    "swiftmodule": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/AppEntry~partial.swiftmodule",
+    "swift-dependencies": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/AppEntry.swiftdeps",
+    "diagnostics": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/AppEntry.dia"
+  },
+  "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/Sources/JWSwarmNode/Views/NodeMenuView.swift": {
+    "object": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/NodeMenuView.swift.o",
+    "swiftmodule": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/NodeMenuView~partial.swiftmodule",
+    "swift-dependencies": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/NodeMenuView.swiftdeps",
+    "diagnostics": "/tmp/workspace/jwraats/JW-Swarm/jw-swarm-nodes/macos/.build/x86_64-unknown-linux-gnu/release/JWSwarmNode.build/NodeMenuView.dia"
+  }
+}
