@@ -35,11 +35,22 @@ class ConfigManager {
     }()
 
     private init() {
-        self.configDir = self.configPath()
+        self.configDir = Self.configPath(fileManager: fileManager)
+        // Bootstrap with a temporary value; load() immediately replaces it.
+        self.config = AppConfig(
+            fleet_url: "",
+            node_id: "",
+            hostname: "",
+            node_cert: "",
+            ca_cert: "",
+            limits: Limits(gpu_power_pct: 0, memory_limit_mb: 0),
+            schedule: Schedule(awake_from: "", awake_until: ""),
+            selected_models: []
+        )
         self.config = self.load()
     }
 
-    private func configPath() -> URL {
+    private static func configPath(fileManager: FileManager) -> URL {
         if let env = ProcessInfo.processInfo.environment["JW_CONFIG_DIR"] {
             return URL(fileURLWithPath: env).appendingPathComponent("jw-swarm-node")
         }

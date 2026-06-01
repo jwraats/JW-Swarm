@@ -29,16 +29,32 @@ private func usedMemoryMB() -> UInt64 {
     return used / (1024 * 1024)
 }
 private func gpuUtilPct() -> Double {
+    // powermetrics lives in /usr/bin and requires root; if it is missing or the
+    // process fails to launch, return early. Never read the pipe unless the
+    // process actually started, otherwise the read blocks forever waiting for an
+    // EOF that never arrives (which would hang whatever thread calls this).
+    let candidatePaths = ["/usr/bin/powermetrics", "/usr/sbin/powermetrics"]
+    guard let toolPath = candidatePaths.first(where: {
+        FileManager.default.isExecutableFile(atPath: $0)
+    }) else {
+        return 0
+    }
     let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/usr/sbin/powermetrics")
+    task.executableURL = URL(fileURLWithPath: toolPath)
     task.arguments = ["--samplers", "gpu", "--samples", "1"]
     let pipe = Pipe()
     task.standardOutput = pipe
-    try? task.run(); task.waitUntilExit()
-    guard let data = try? pipe.fileHandleForReading.read(upToCount: Int.max), !data.isEmpty else {
+    task.standardError = FileHandle.nullDevice
+    do {
+        try task.run()
+    } catch {
         return 0
     }
-    guard let text = String(data: data, encoding: .utf8) else { return 0 }
+    let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
+    task.waitUntilExit()
+    guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else {
+        return 0
+    }
     var maxMHz: Double? = nil, curMHz: Double? = nil
     for line in text.split(separator: "\n") {
         let low = String(line).lowercased()

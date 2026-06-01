@@ -1,17 +1,150 @@
+import AppKit
 import Foundation
-import SwiftUI
 
+// Pure AppKit entry point. A menu-bar-only agent works far more reliably with a
+// plain NSApplication run loop than with the SwiftUI `App`/`Settings` scene,
+// especially when launched as a bare binary via `swift run` (no app bundle or
+// Info.plist). This guarantees the status-bar menu is created and interactive.
 @main
-struct JWSwarmNodeApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    var body: some Scene {
-        MenuBarExtra("JW Swarm", systemImage: "network") { NodeMenuView() }
+enum JWSwarmNodeMain {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        // Retain the delegate for the lifetime of the process.
+        app.delegate = delegate
+        AppDelegate.retained = delegate
+        app.setActivationPolicy(.accessory)
+        app.run()
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    static var retained: AppDelegate?
+
+    private var statusItem: NSStatusItem?
+    private var refreshTimer: Timer?
+
+    private let statusMenuItem = NSMenuItem(title: "Status: Starting...", action: nil, keyEquivalent: "")
+    private let modelsMenuItem = NSMenuItem(title: "Models: -", action: nil, keyEquivalent: "")
+    private let awakeMenuItem = NSMenuItem(title: "Awake", action: #selector(toggleAwake), keyEquivalent: "")
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setupStatusItem()
         NodeCoordinator.shared.start(config: ConfigManager.shared.config)
+
+        // Keep menu labels in sync with runtime state.
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.updateMenuState()
+        }
+        updateMenuState()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        refreshTimer?.invalidate()
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        updateMenuState()
+    }
+
+    private func setupStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = item
+
+        if let button = item.button {
+            if let icon = Self.menuBarIcon() {
+                button.image = icon
+                button.imagePosition = .imageOnly
+            } else {
+                // Fallback so the item is never invisible if the asset is missing.
+                button.title = "JW Swarm"
+            }
+        }
+
+        let menu = NSMenu()
+        menu.delegate = self
+
+        statusMenuItem.isEnabled = false
+        modelsMenuItem.isEnabled = false
+
+        awakeMenuItem.target = self
+        awakeMenuItem.state = .on
+
+        let openConfig = NSMenuItem(title: "Open Config Folder", action: #selector(openConfigFolder), keyEquivalent: "")
+        openConfig.target = self
+
+        let quit = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
+        quit.target = self
+
+        menu.addItem(statusMenuItem)
+        menu.addItem(modelsMenuItem)
+        menu.addItem(.separator())
+        menu.addItem(awakeMenuItem)
+        menu.addItem(openConfig)
+        menu.addItem(.separator())
+        menu.addItem(quit)
+
+        item.menu = menu
+    }
+
+    /// Loads the menu-bar icon and configures it as a template image so macOS
+    /// tints it correctly for light/dark menu bars. Sized to standard menu-bar
+    /// height (~18pt).
+    private static func menuBarIcon() -> NSImage? {
+        let bundleCandidates: [URL] = [
+            Bundle.main.bundleURL.appendingPathComponent("JWSwarmNode_JWSwarmNode.bundle"),
+            Bundle.main.resourceURL?.appendingPathComponent("JWSwarmNode_JWSwarmNode.bundle"),
+            URL(fileURLWithPath: CommandLine.arguments[0])
+                .deletingLastPathComponent()
+                .appendingPathComponent("JWSwarmNode_JWSwarmNode.bundle"),
+        ].compactMap { $0 }
+
+        var iconURL: URL?
+        for bundleURL in bundleCandidates {
+            guard let bundle = Bundle(url: bundleURL) else { continue }
+            if let u = bundle.url(forResource: "JWMenuBar", withExtension: "svg") {
+                iconURL = u
+                break
+            }
+        }
+
+        guard let iconURL, let image = NSImage(contentsOf: iconURL) else {
+            return nil
+        }
+        let target: CGFloat = 18
+        let aspect = image.size.height > 0 ? image.size.width / image.size.height : 1
+        image.size = NSSize(width: target * aspect, height: target)
+        image.isTemplate = true
+        return image
+    }
+
+    private func updateMenuState() {
+        let coordinator = NodeCoordinator.shared
+        statusMenuItem.title = "Status: \(coordinator.status)"
+        if coordinator.readyModels.isEmpty {
+            modelsMenuItem.title = "Models: -"
+        } else {
+            modelsMenuItem.title = "Models: \(coordinator.readyModels.joined(separator: ", "))"
+        }
+        awakeMenuItem.state = coordinator.isAwake ? .on : .off
+    }
+
+    @objc
+    private func toggleAwake() {
+        NodeCoordinator.shared.isAwake.toggle()
+        updateMenuState()
+    }
+
+    @objc
+    private func openConfigFolder() {
+        let dir = ConfigManager.shared.dataDir()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(dir)
+    }
+
+    @objc
+    private func quitApp() {
+        NSApplication.shared.terminate(nil)
     }
 }
 
@@ -34,11 +167,13 @@ class NodeCoordinator: @unchecked Sendable {
         }
         self.tunnel = Tunnel(fleetURL)
         self.tunnel?.setIncomingHandler { text in
-            NodeCoordinator.shared.handleInbound(text)
+            Task { @MainActor in
+                NodeCoordinator.shared.handleInbound(text)
+            }
         }
         self.tunnel?.startLoop()
         self.status = "Connecting..."
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) {
             NodeCoordinator.shared.doSendRegister()
             NodeCoordinator.shared.doSendCatalogRequest()
         }

@@ -58,9 +58,102 @@ jobs:
       - name: Build & package (.dmg/.pkg)
         if: steps.check.outputs.present == 'true'
         working-directory: jw-swarm-nodes/macos
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: |
           if [ -f Package.swift ]; then
             swift build -c release
+
+            APP_NAME="JWSwarmNode"
+            BUILD_ROOT="build"
+            APP_BUNDLE="$BUILD_ROOT/$APP_NAME.app"
+            RELEASE_BIN=$(find .build -path "*-apple-macosx/release/$APP_NAME" -type f | head -n 1)
+
+            if [ -z "$RELEASE_BIN" ]; then
+              echo "::error::Could not locate SwiftPM release binary for $APP_NAME"
+              exit 1
+            fi
+
+            rm -rf "$APP_BUNDLE"
+            mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
+            cp "$RELEASE_BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+            chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+
+            # Copy SwiftPM-generated resource bundle(s) (menu-bar icon, etc.)
+            # into Resources (codesign-safe location). Runtime icon loader
+            # resolves this path directly.
+            RELEASE_DIR=$(dirname "$RELEASE_BIN")
+            for b in "$RELEASE_DIR"/*.bundle; do
+              [ -e "$b" ] || continue
+              cp -R "$b" "$APP_BUNDLE/Contents/Resources/"
+            done
+
+            ICON_SVG="Sources/JWSwarmNode/Resources/JWIcon.svg"
+            if [ -f "$ICON_SVG" ]; then
+              TMP_DIR=$(mktemp -d)
+              ICONSET_DIR="$TMP_DIR/AppIcon.iconset"
+              mkdir -p "$ICONSET_DIR"
+              BASE_PNG="$TMP_DIR/icon_1024.png"
+
+              sips -s format png "$ICON_SVG" --out "$BASE_PNG" >/dev/null
+
+              sips -z 16 16 "$BASE_PNG" --out "$ICONSET_DIR/icon_16x16.png" >/dev/null
+              sips -z 32 32 "$BASE_PNG" --out "$ICONSET_DIR/icon_16x16@2x.png" >/dev/null
+              sips -z 32 32 "$BASE_PNG" --out "$ICONSET_DIR/icon_32x32.png" >/dev/null
+              sips -z 64 64 "$BASE_PNG" --out "$ICONSET_DIR/icon_32x32@2x.png" >/dev/null
+              sips -z 128 128 "$BASE_PNG" --out "$ICONSET_DIR/icon_128x128.png" >/dev/null
+              sips -z 256 256 "$BASE_PNG" --out "$ICONSET_DIR/icon_128x128@2x.png" >/dev/null
+              sips -z 256 256 "$BASE_PNG" --out "$ICONSET_DIR/icon_256x256.png" >/dev/null
+              sips -z 512 512 "$BASE_PNG" --out "$ICONSET_DIR/icon_256x256@2x.png" >/dev/null
+              sips -z 512 512 "$BASE_PNG" --out "$ICONSET_DIR/icon_512x512.png" >/dev/null
+              cp "$BASE_PNG" "$ICONSET_DIR/icon_512x512@2x.png"
+
+              iconutil -c icns "$ICONSET_DIR" -o "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+              rm -rf "$TMP_DIR"
+            fi
+
+            printf '%s\n' \
+              '<?xml version="1.0" encoding="UTF-8"?>' \
+              '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+              '<plist version="1.0">' \
+              '<dict>' \
+              '  <key>CFBundleDevelopmentRegion</key>' \
+              '  <string>en</string>' \
+              '  <key>CFBundleExecutable</key>' \
+              '  <string>JWSwarmNode</string>' \
+              '  <key>CFBundleIdentifier</key>' \
+              '  <string>com.jwraats.jwswarmnode</string>' \
+              '  <key>CFBundleInfoDictionaryVersion</key>' \
+              '  <string>6.0</string>' \
+              '  <key>CFBundleIconFile</key>' \
+              '  <string>AppIcon</string>' \
+              '  <key>CFBundleName</key>' \
+              '  <string>JW Swarm Node</string>' \
+              '  <key>CFBundlePackageType</key>' \
+              '  <string>APPL</string>' \
+              '  <key>CFBundleShortVersionString</key>' \
+              '  <string>0.1.0</string>' \
+              '  <key>CFBundleVersion</key>' \
+              '  <string>1</string>' \
+              '  <key>LSMinimumSystemVersion</key>' \
+              '  <string>13.0</string>' \
+              '  <key>LSUIElement</key>' \
+              '  <true/>' \
+              '</dict>' \
+              '</plist>' > "$APP_BUNDLE/Contents/Info.plist"
+
+            if [ -n "$MACOS_SIGN_IDENTITY" ]; then
+              echo "Using Developer ID signing identity: $MACOS_SIGN_IDENTITY"
+              codesign --force --deep --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$APP_BUNDLE"
+            else
+              echo "::notice::MACOS_SIGN_IDENTITY not set; using ad-hoc signing for integrity."
+              codesign --force --deep --sign - "$APP_BUNDLE"
+            fi
+
+            codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
+
+            mkdir -p "$BUILD_ROOT"
+            hdiutil create -volname "JW Swarm Node" -srcfolder "$APP_BUNDLE" -ov -format UDZO "$BUILD_ROOT/$APP_NAME.dmg"
           else
             xcodebuild -scheme JWSwarmNode -configuration Release
           fi
@@ -69,7 +162,11 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: jw-swarm-node-macos
-          path: jw-swarm-nodes/macos/build/**/*.{dmg,pkg,app}
+          path: |
+            jw-swarm-nodes/macos/.build/*-apple-macosx/release/JWSwarmNode
+            jw-swarm-nodes/macos/build/**/*.dmg
+            jw-swarm-nodes/macos/build/**/*.pkg
+            jw-swarm-nodes/macos/build/**/*.app
           if-no-files-found: ignore
 
   # -------------------------------------------------------------- Windows ----

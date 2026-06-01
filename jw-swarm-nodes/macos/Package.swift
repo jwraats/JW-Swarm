@@ -8,6 +8,9 @@ let package = Package(
         .executableTarget(
             name: "JWSwarmNode",
             path: "Sources/JWSwarmNode",
+            resources: [
+                .process("Resources"),
+            ],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("SwiftUI"),

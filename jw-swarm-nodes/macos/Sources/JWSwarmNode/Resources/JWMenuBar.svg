@@ -1,0 +1,27 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Connection lines -->
+  <g stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" opacity="0.9">
+    <line x1="78" y1="48" x2="164" y2="104"></line>
+    <line x1="214" y1="48" x2="164" y2="104"></line>
+    <line x1="164" y1="104" x2="134" y2="180"></line>
+    <line x1="164" y1="104" x2="194" y2="180"></line>
+  </g>
+
+  <!-- JW -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round">
+    <!-- J -->
+    <path d="M78 48v86c0 32-18 50-50 50"></path>
+
+    <!-- W -->
+    <path d="M112 48l22 132 30-76 30 76 22-132"></path>
+  </g>
+
+  <!-- Neural connection dots -->
+  <g fill="#FFFFFF">
+    <circle cx="78" cy="48" r="6"></circle>
+    <circle cx="214" cy="48" r="6"></circle>
+    <circle cx="164" cy="104" r="7"></circle>
+    <circle cx="134" cy="180" r="5"></circle>
+    <circle cx="194" cy="180" r="5"></circle>
+  </g>
+</svg>
