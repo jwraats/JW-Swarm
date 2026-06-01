@@ -69,7 +69,11 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: jw-swarm-node-macos
-          path: jw-swarm-nodes/macos/build/**/*.{dmg,pkg,app}
+          path: |
+            jw-swarm-nodes/macos/.build/*-apple-macosx/release/JWSwarmNode
+            jw-swarm-nodes/macos/build/**/*.dmg
+            jw-swarm-nodes/macos/build/**/*.pkg
+            jw-swarm-nodes/macos/build/**/*.app
           if-no-files-found: ignore
 
   # -------------------------------------------------------------- Windows ----
