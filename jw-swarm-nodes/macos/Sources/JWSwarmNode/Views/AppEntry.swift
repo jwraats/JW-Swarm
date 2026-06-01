@@ -91,8 +91,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// tints it correctly for light/dark menu bars. Sized to standard menu-bar
     /// height (~18pt).
     private static func menuBarIcon() -> NSImage? {
-        guard let url = Bundle.module.url(forResource: "JWMenuBar", withExtension: "svg"),
-              let image = NSImage(contentsOf: url) else {
+        let bundleCandidates: [URL] = [
+            Bundle.main.bundleURL.appendingPathComponent("JWSwarmNode_JWSwarmNode.bundle"),
+            Bundle.main.resourceURL?.appendingPathComponent("JWSwarmNode_JWSwarmNode.bundle"),
+            URL(fileURLWithPath: CommandLine.arguments[0])
+                .deletingLastPathComponent()
+                .appendingPathComponent("JWSwarmNode_JWSwarmNode.bundle"),
+        ].compactMap { $0 }
+
+        var iconURL: URL?
+        for bundleURL in bundleCandidates {
+            guard let bundle = Bundle(url: bundleURL) else { continue }
+            if let u = bundle.url(forResource: "JWMenuBar", withExtension: "svg") {
+                iconURL = u
+                break
+            }
+        }
+
+        guard let iconURL, let image = NSImage(contentsOf: iconURL) else {
             return nil
         }
         let target: CGFloat = 18

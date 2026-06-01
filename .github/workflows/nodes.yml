@@ -80,7 +80,8 @@ jobs:
             chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
             # Copy SwiftPM-generated resource bundle(s) (menu-bar icon, etc.)
-            # into Resources so Bundle.module can find them at runtime.
+            # into Resources (codesign-safe location). Runtime icon loader
+            # resolves this path directly.
             RELEASE_DIR=$(dirname "$RELEASE_BIN")
             for b in "$RELEASE_DIR"/*.bundle; do
               [ -e "$b" ] || continue

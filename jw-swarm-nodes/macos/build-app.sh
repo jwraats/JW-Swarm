@@ -28,8 +28,8 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp "$BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
-# Copy SwiftPM-generated resource bundle(s) into Resources so Bundle.module can
-# find them (menu-bar icon, etc.). Resources/ is the codesign-friendly location.
+# Copy SwiftPM-generated resource bundle(s) into Resources (codesign-safe
+# location). Icon loading resolves this path directly.
 for b in "$BIN_DIR"/*.bundle; do
   [ -e "$b" ] || continue
   cp -R "$b" "$APP_BUNDLE/Contents/Resources/"
