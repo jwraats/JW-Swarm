@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 struct NodeMenuView: View {
-    @State private var refresh = UUID()
+    @State private var refreshTick = 0
     @State private var showConfig = false
     private var c: NodeCoordinator { NodeCoordinator.shared }
 
@@ -31,11 +31,10 @@ struct NodeMenuView: View {
             Button("Quit") { NSApplication.shared.terminate(nil) }
         }
         .padding().frame(width: 280)
-        .id(refresh)
         .task {
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                refresh = UUID()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                refreshTick += 1
             }
         }
     }
