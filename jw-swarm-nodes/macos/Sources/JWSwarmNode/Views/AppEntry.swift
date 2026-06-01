@@ -6,6 +6,7 @@ struct JWSwarmNodeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     var body: some Scene {
         MenuBarExtra("JW Swarm", systemImage: "network") { NodeMenuView() }
+            .menuBarExtraStyle(.menu)
     }
 }
 
