@@ -88,6 +88,30 @@ jobs:
               cp -R "$b" "$APP_BUNDLE/Contents/Resources/"
             done
 
+            ICON_SVG="Sources/JWSwarmNode/Resources/JWIcon.svg"
+            if [ -f "$ICON_SVG" ]; then
+              TMP_DIR=$(mktemp -d)
+              ICONSET_DIR="$TMP_DIR/AppIcon.iconset"
+              mkdir -p "$ICONSET_DIR"
+              BASE_PNG="$TMP_DIR/icon_1024.png"
+
+              sips -s format png "$ICON_SVG" --out "$BASE_PNG" >/dev/null
+
+              sips -z 16 16 "$BASE_PNG" --out "$ICONSET_DIR/icon_16x16.png" >/dev/null
+              sips -z 32 32 "$BASE_PNG" --out "$ICONSET_DIR/icon_16x16@2x.png" >/dev/null
+              sips -z 32 32 "$BASE_PNG" --out "$ICONSET_DIR/icon_32x32.png" >/dev/null
+              sips -z 64 64 "$BASE_PNG" --out "$ICONSET_DIR/icon_32x32@2x.png" >/dev/null
+              sips -z 128 128 "$BASE_PNG" --out "$ICONSET_DIR/icon_128x128.png" >/dev/null
+              sips -z 256 256 "$BASE_PNG" --out "$ICONSET_DIR/icon_128x128@2x.png" >/dev/null
+              sips -z 256 256 "$BASE_PNG" --out "$ICONSET_DIR/icon_256x256.png" >/dev/null
+              sips -z 512 512 "$BASE_PNG" --out "$ICONSET_DIR/icon_256x256@2x.png" >/dev/null
+              sips -z 512 512 "$BASE_PNG" --out "$ICONSET_DIR/icon_512x512.png" >/dev/null
+              cp "$BASE_PNG" "$ICONSET_DIR/icon_512x512@2x.png"
+
+              iconutil -c icns "$ICONSET_DIR" -o "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+              rm -rf "$TMP_DIR"
+            fi
+
             printf '%s\n' \
               '<?xml version="1.0" encoding="UTF-8"?>' \
               '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
@@ -101,6 +125,8 @@ jobs:
               '  <string>com.jwraats.jwswarmnode</string>' \
               '  <key>CFBundleInfoDictionaryVersion</key>' \
               '  <string>6.0</string>' \
+              '  <key>CFBundleIconFile</key>' \
+              '  <string>AppIcon</string>' \
               '  <key>CFBundleName</key>' \
               '  <string>JW Swarm Node</string>' \
               '  <key>CFBundlePackageType</key>' \
