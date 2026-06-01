@@ -58,6 +58,8 @@ jobs:
       - name: Build & package (.dmg/.pkg)
         if: steps.check.outputs.present == 'true'
         working-directory: jw-swarm-nodes/macos
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: |
           if [ -f Package.swift ]; then
             swift build -c release
@@ -104,6 +106,16 @@ jobs:
               '  <true/>' \
               '</dict>' \
               '</plist>' > "$APP_BUNDLE/Contents/Info.plist"
+
+            if [ -n "$MACOS_SIGN_IDENTITY" ]; then
+              echo "Using Developer ID signing identity: $MACOS_SIGN_IDENTITY"
+              codesign --force --deep --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$APP_BUNDLE"
+            else
+              echo "::notice::MACOS_SIGN_IDENTITY not set; using ad-hoc signing for integrity."
+              codesign --force --deep --sign - "$APP_BUNDLE"
+            fi
+
+            codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 
             mkdir -p "$BUILD_ROOT"
             hdiutil create -volname "JW Swarm Node" -srcfolder "$APP_BUNDLE" -ov -format UDZO "$BUILD_ROOT/$APP_NAME.dmg"
