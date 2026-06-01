@@ -20,7 +20,7 @@ class Tunnel: @unchecked Sendable {
             t.resume()
             socket = t
             backoff = 1
-            drainMessages()
+            await drainMessages()
             while let r = try? await socket?.receive() {
                 switch r {
                 case .string(let s): onMessage?(s)
@@ -37,12 +37,12 @@ class Tunnel: @unchecked Sendable {
     }
 
     @MainActor
-    private func drainMessages() {
+    private func drainMessages() async {
         let pending = queue
         queue = []
         guard let sock = socket else { queue = pending; return }
         for msg in pending {
-            Task { try? await sock.send(.string(msg)) }
+            try? await sock.send(.string(msg))
         }
     }
 
