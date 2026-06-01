@@ -122,7 +122,9 @@ class NodeCoordinator: @unchecked Sendable {
         }
         self.tunnel = Tunnel(fleetURL)
         self.tunnel?.setIncomingHandler { text in
-            NodeCoordinator.shared.handleInbound(text)
+            Task { @MainActor in
+                NodeCoordinator.shared.handleInbound(text)
+            }
         }
         self.tunnel?.startLoop()
         self.status = "Connecting..."
