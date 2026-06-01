@@ -61,6 +61,53 @@ jobs:
         run: |
           if [ -f Package.swift ]; then
             swift build -c release
+
+            APP_NAME="JWSwarmNode"
+            BUILD_ROOT="build"
+            APP_BUNDLE="$BUILD_ROOT/$APP_NAME.app"
+            RELEASE_BIN=$(find .build -path "*-apple-macosx/release/$APP_NAME" -type f | head -n 1)
+
+            if [ -z "$RELEASE_BIN" ]; then
+              echo "::error::Could not locate SwiftPM release binary for $APP_NAME"
+              exit 1
+            fi
+
+            rm -rf "$APP_BUNDLE"
+            mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
+            cp "$RELEASE_BIN" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+            chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+
+            cat > "$APP_BUNDLE/Contents/Info.plist" <<'PLIST'
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+            <plist version="1.0">
+            <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>en</string>
+              <key>CFBundleExecutable</key>
+              <string>JWSwarmNode</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.jwraats.jwswarmnode</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>JW Swarm Node</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>0.1.0</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>13.0</string>
+              <key>LSUIElement</key>
+              <true/>
+            </dict>
+            </plist>
+            PLIST
+
+            mkdir -p "$BUILD_ROOT"
+            hdiutil create -volname "JW Swarm Node" -srcfolder "$APP_BUNDLE" -ov -format UDZO "$BUILD_ROOT/$APP_NAME.dmg"
           else
             xcodebuild -scheme JWSwarmNode -configuration Release
           fi
