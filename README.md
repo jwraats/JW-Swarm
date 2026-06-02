@@ -128,3 +128,7 @@ Each component is built and released independently by GitHub Actions:
 - **Fleet Manager** — [`.github/workflows/fleet-manager.yml`](.github/workflows/fleet-manager.yml) builds, tests, and produces a standalone Debian package. Tag `fleet-manager-v*` to publish a release.
 - **Nodes** — [`.github/workflows/nodes.yml`](.github/workflows/nodes.yml) builds the Linux (`.deb`), macOS (`.dmg`/`.pkg`), and Windows (`.msi`) node packages. Tag `nodes-v*` to publish a release.
 
+## Third-party notices
+
+- macOS node third-party license notices: [jw-swarm-nodes/macos/THIRD_PARTY_NOTICES.md](jw-swarm-nodes/macos/THIRD_PARTY_NOTICES.md)
+

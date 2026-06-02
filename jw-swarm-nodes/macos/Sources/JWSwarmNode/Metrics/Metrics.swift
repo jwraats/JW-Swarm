@@ -5,6 +5,41 @@ struct MetricsInfo {
     let usedMB: UInt64
     let gpuPct: Double
 }
+
+func deviceTotalMemoryMB() -> UInt64 {
+    totalMemoryMB()
+}
+
+func detectedGPUDescription() -> String {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/usr/sbin/system_profiler")
+    task.arguments = ["SPDisplaysDataType", "-json"]
+    let pipe = Pipe()
+    task.standardOutput = pipe
+    task.standardError = FileHandle.nullDevice
+    do {
+        try task.run()
+    } catch {
+        return "Apple Silicon"
+    }
+    let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
+    task.waitUntilExit()
+    guard
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let displays = obj["SPDisplaysDataType"] as? [[String: Any]],
+        let first = displays.first
+    else {
+        return "Apple Silicon"
+    }
+    if let model = first["sppci_model"] as? String, !model.isEmpty {
+        return model
+    }
+    if let model = first["_name"] as? String, !model.isEmpty {
+        return model
+    }
+    return "Apple Silicon"
+}
+
 func collectMetrics() -> MetricsInfo {
     MetricsInfo(totalMB: totalMemoryMB(), usedMB: usedMemoryMB(), gpuPct: gpuUtilPct())
 }

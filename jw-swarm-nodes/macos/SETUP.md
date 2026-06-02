@@ -40,6 +40,18 @@ The binary appears at `.build/release/JWSwarmNode`. Launch it from Finder or the
 
 The app places an icon in the menu bar. Click it for status, awake toggle, and config.
 
+## Configuration window
+
+Use the menu-bar item `Configuration...` to open a native macOS configuration window.
+
+- Reads detected device unified memory and displays it in MB.
+- Reads and displays detected GPU model/kind.
+- Shows and allows editing of `node_cert` (PEM) and `ca_cert` paths.
+- Lets you set the node memory limit (MB), clamped to the detected memory.
+- Persists values to `config.json` and applies them immediately.
+- Re-registers the node with Fleet Manager after save.
+- Includes `Test Connection (mTLS)` to validate cert files and run an mTLS handshake probe to the Fleet endpoint.
+
 ## Configure
 
 ### Fleet URL
@@ -58,6 +70,9 @@ The app expects a PEM file containing both the client certificate and private ke
 export JW_NODE_CERT=/path/to/node.pem
 export JW_CA_CERT=/path/to/ca.crt
 ```
+
+Runtime tunnel mTLS now uses these configured cert files directly for websocket connections.
+If `JW_NODE_CERT` points to a `.p12` / `.pfx` file, set `JW_NODE_CERT_PASSWORD` as well.
 
 Or set the paths from the config sheet. The cert/key are **not** stored in the macOS Keychain — the PEM file is read at runtime.
 
@@ -85,7 +100,12 @@ export JW_CONFIG_DIR=/custom/path
 
 ## Backend
 
-The current backend is a **stub** that simulates inference with fixed tokens. The MLX backend is planned for a follow-up phase.
+The macOS node now uses [llama.swift](https://github.com/mattt/llama.swift), which wraps llama.cpp, to run downloaded models locally.
+
+- Downloaded model files preserve their original names (for example `.gguf`).
+- A compatibility symlink to `weights.bin` is still created.
+- Requests are executed with a greedy decode path and streamed as token chunks.
+- If a model file exceeds the configured memory limit, that model is excluded from `ready_models`.
 
 ## Fleet Manager side
 
@@ -94,3 +114,8 @@ The operator must issue this node a client certificate. See the Fleet Manager [S
 ## CI
 
 The [.github/workflows/nodes.yml](../../.github/workflows/nodes.yml) workflow detects `Package.swift` and builds on `macos-latest`.
+
+## Third-party notices
+
+For llama.swift / llama.cpp license attribution included by the macOS node,
+see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

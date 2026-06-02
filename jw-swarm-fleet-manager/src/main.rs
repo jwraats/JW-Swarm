@@ -59,7 +59,7 @@ fn build_router(state: AppState) -> Router {
         .route("/v1/chat/completions", post(api::chat_completions))
         .route("/node/connect", get(tunnel::node_connect))
         .route("/admin/nodes", get(admin::admin_nodes))
-        .route("/admin/nodes/:path", get(admin::admin_node_earnings))
+        .route("/admin/nodes/{path}", get(admin::admin_node_earnings))
         .route("/admin/leaderboard", get(admin::admin_leaderboard))
         .with_state(state)
 }
