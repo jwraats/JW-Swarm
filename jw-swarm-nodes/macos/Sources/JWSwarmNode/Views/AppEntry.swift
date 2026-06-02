@@ -27,6 +27,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusMenuItem = NSMenuItem(title: "Status: Starting...", action: nil, keyEquivalent: "")
     private let modelsMenuItem = NSMenuItem(title: "Models: -", action: nil, keyEquivalent: "")
     private let awakeMenuItem = NSMenuItem(title: "Awake", action: #selector(toggleAwake), keyEquivalent: "")
+    private var configWindowController: ConfigWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -73,6 +74,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let openConfig = NSMenuItem(title: "Open Config Folder", action: #selector(openConfigFolder), keyEquivalent: "")
         openConfig.target = self
 
+        let openConfigWindow = NSMenuItem(title: "Configuration...", action: #selector(openConfigurationWindow), keyEquivalent: ",")
+        openConfigWindow.target = self
+
         let quit = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
 
@@ -80,6 +84,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(modelsMenuItem)
         menu.addItem(.separator())
         menu.addItem(awakeMenuItem)
+        menu.addItem(openConfigWindow)
         menu.addItem(openConfig)
         menu.addItem(.separator())
         menu.addItem(quit)
@@ -143,6 +148,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc
+    private func openConfigurationWindow() {
+        if configWindowController == nil {
+            configWindowController = ConfigWindowController()
+            configWindowController?.onSave = { [weak self] updated in
+                NodeCoordinator.shared.applyConfig(updated)
+                self?.updateMenuState()
+            }
+        }
+        configWindowController?.showWindowAndActivate()
+    }
+
+    @objc
     private func quitApp() {
         NSApplication.shared.terminate(nil)
     }
@@ -156,23 +173,17 @@ class NodeCoordinator: @unchecked Sendable {
 
     private var tunnel: Tunnel?
     private var config: AppConfig?
-    private let backend = StubBackend()
+    private let backend = LlamaBackend(memoryLimitMB: ConfigManager.shared.config.limits.memory_limit_mb)
     private var heartbeatTask: Task<Void, Never>?
 
     func start(config: AppConfig) {
         self.config = config
-        guard let fleetURL = URL(string: config.fleet_url) else {
+        self.backend.updateMemoryLimitMB(config.limits.memory_limit_mb)
+        guard URL(string: config.fleet_url) != nil else {
             self.status = "Invalid fleet URL"
             return
         }
-        self.tunnel = Tunnel(fleetURL)
-        self.tunnel?.setIncomingHandler { text in
-            Task { @MainActor in
-                NodeCoordinator.shared.handleInbound(text)
-            }
-        }
-        self.tunnel?.startLoop()
-        self.status = "Connecting..."
+        self.startOrRestartTunnel()
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.5) {
             NodeCoordinator.shared.doSendRegister()
             NodeCoordinator.shared.doSendCatalogRequest()
@@ -183,6 +194,43 @@ class NodeCoordinator: @unchecked Sendable {
                 try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
+    }
+
+    func applyConfig(_ updated: AppConfig) {
+        let old = self.config
+        self.config = updated
+        self.backend.updateMemoryLimitMB(updated.limits.memory_limit_mb)
+
+        let needsReconnect =
+            old?.fleet_url != updated.fleet_url ||
+            old?.node_cert != updated.node_cert ||
+            old?.ca_cert != updated.ca_cert
+        if needsReconnect {
+            self.startOrRestartTunnel()
+        }
+
+        self.doSendRegister()
+        self.doSendCatalogRequest()
+    }
+
+    private func startOrRestartTunnel() {
+        guard let c = config, let fleetURL = URL(string: c.fleet_url) else {
+            self.status = "Invalid fleet URL"
+            return
+        }
+
+        self.tunnel?.stop()
+
+        let t = Tunnel(fleetURL, nodeCertPath: c.node_cert, caCertPath: c.ca_cert)
+        t.setIncomingHandler { text in
+            Task { @MainActor in
+                NodeCoordinator.shared.handleInbound(text)
+            }
+        }
+        t.startLoop()
+
+        self.tunnel = t
+        self.status = "Connecting..."
     }
 
     private func doSendRegister() {

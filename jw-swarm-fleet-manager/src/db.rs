@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use ::time::OffsetDateTime;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
 use sqlx::SqlitePool;
 
 use crate::proto::{GpuVendor, OsKind, Register, Usage};
@@ -15,7 +16,12 @@ pub struct Db {
 impl Db {
     pub async fn connect(path: &str) -> anyhow::Result<Self> {
         let url = format!("sqlite://{path}");
-        let pool = SqlitePool::connect(&url).await?;
+        let options = url
+            .parse::<SqliteConnectOptions>()?
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal);
+        let pool = SqlitePool::connect_with(options).await?;
 
         sqlx::migrate!().run(&pool).await?;
 

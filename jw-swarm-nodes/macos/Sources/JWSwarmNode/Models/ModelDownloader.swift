@@ -15,7 +15,9 @@ final class ModelDownloader {
             }
         }
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
-        let dest = dir.appendingPathComponent("weights.bin")
+        let remoteName = URL(string: m.download_url)?.lastPathComponent ?? "weights.bin"
+        let filename = remoteName.isEmpty ? "weights.bin" : remoteName
+        let dest = dir.appendingPathComponent(filename)
         log("downloading \(m.id) (\(m.size_bytes) bytes)")
         guard let url = URL(string: m.download_url) else { throw DLE.invalidURL }
         let (tu, resp) = try await session.download(from: url)
@@ -28,7 +30,13 @@ final class ModelDownloader {
             try? FileManager.default.removeItem(at: tu)
             throw DLE.mismatch(expected: m.sha256, actual: hash)
         }
+        try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: tu, to: dest)
+        if filename != "weights.bin" {
+            let legacy = dir.appendingPathComponent("weights.bin")
+            try? FileManager.default.removeItem(at: legacy)
+            try? FileManager.default.createSymbolicLink(at: legacy, withDestinationURL: dest)
+        }
         try m.sha256.write(to: shaPath, atomically: true, encoding: .utf8)
         log("\(m.id) verified")
     }

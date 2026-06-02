@@ -116,14 +116,16 @@ class ConfigManager {
         }
     }
 
+    func setAndSave(_ c: AppConfig) {
+        self.config = c
+        save(c)
+    }
+
     func modelDir() -> URL {
         dataDir().appendingPathComponent("models")
     }
 
     func dataDir() -> URL {
-        fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first?
-            .appendingPathComponent("JWSwarmNode")
-            ?? FileManager.default.temporaryDirectory.appendingPathComponent("jw-swarm-node")
+        configDir
     }
 }
