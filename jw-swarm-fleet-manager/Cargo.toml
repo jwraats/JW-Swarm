@@ -24,6 +24,7 @@ anyhow = "1"
 thiserror = "2"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros"] }
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
+sha2 = "0.10"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

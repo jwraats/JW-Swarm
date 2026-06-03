@@ -12,6 +12,8 @@ This directory is the **language-neutral source of truth** for the JW Swarm tunn
   { "type": "<MessageType>", "payload": { ... } }
   ```
 
+> The mTLS client certificate used to open the tunnel is obtained out-of-band, **before** the tunnel exists. That happens over the Fleet Manager's HTTP **bootstrap enrollment API** (`/bootstrap/ca.crt`, `/bootstrap/tokens`, `/bootstrap/enroll`), which is *not* part of this tunnel protocol. See [DESIGN §9.1](../DESIGN.md#91-bootstrap-enrollment) and the [sequence diagram](../sequence.puml) for that handshake.
+
 ## Messages
 
 ### Node → Fleet Manager
@@ -39,6 +41,7 @@ This directory is the **language-neutral source of truth** for the JW Swarm tunn
 1. Node connects (mTLS) → sends `Register` (including `selected_models`, a list of aliases the owner chose to host).
 2. Node sends `CatalogRequest` → FM replies `CatalogResponse`, resolved for this node's GPU vendor.
 3. Node decides **what to download**: for each alias in `selected_models`, it looks up the matching entry (by `id`) in `CatalogResponse` and downloads that entry's `download_url` into its app data dir, verifying `sha256`. Aliases with no variant for this vendor are skipped.
+  Nodes may also skip artifacts whose resolved `backend` they do not support yet.
 4. Node sends `ModelStatus` (the set of aliases now downloaded/loaded and ready) and `ScheduleState`.
 5. Node sends `Heartbeat` periodically (default every 5s).
 6. FM routes a client request → sends `PromptDispatch` (targeting an alias the node reported ready).

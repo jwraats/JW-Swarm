@@ -8,13 +8,20 @@
 # hardware (e.g. a client always asks for "qwen3-coder"). Each `[[model.variant]]`
 # is the hardware-specific artifact the Fleet Manager resolves per node based on
 # the node's GPU vendor, so:
-#   - Apple Silicon  -> MLX model
+#   - Apple Silicon  -> currently a llama.cpp-compatible single-file artifact
 #   - NVIDIA         -> CUDA (vLLM) model
 #   - AMD            -> ROCm (llama.cpp) model
 #   - Intel          -> SYCL/Vulkan (llama.cpp) model
 #
 # Each variant includes a download URL and sha256 so every node of a given
 # vendor runs the exact same artifact.
+#
+# Important:
+# - The current macOS node does not run Hugging Face MLX repos directly.
+# - Apple variants must therefore point at single-file artifacts that the
+#   bundled `llama.swift` backend can load.
+# - Placeholder all-zero sha256 values below are examples only and must be
+#   replaced before expecting those models to download successfully.
 #
 # `backend` values: vllm | llama.cpp | mlx
 # `vendor`  values: nvidia | amd | apple | intel
@@ -73,6 +80,20 @@ sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 size_bytes = 18000000000
 context_length = 32768
 params_billions = 32.5
+
+# ---------------------------------------------------------------------------
+[[model]]
+alias = "qwen35-9b"
+display_name = "Qwen3.5 9B"
+
+[[model.variant]]
+vendor = "apple"
+backend = "llama.cpp"
+download_url = "https://huggingface.co/unsloth/Qwen3.5-9B-MTP-GGUF/resolve/main/Qwen3.5-9B-UD-IQ2_M.gguf"
+sha256 = "2f3ab9f96fc4bd72c5bde1c32d3355ffc067e6f00e7dc22b234278d37abb4bb9"
+size_bytes = 3969560928
+context_length = 262144
+params_billions = 9.0
 
 [[model.variant]]
 vendor = "nvidia"

@@ -33,6 +33,12 @@ node "Public Entry Point" {
 
 node "Orchestrator" {
     [Fleet Manager] as Fleet
+    note left of Fleet
+        OpenAI HTTP API (/v1/*)
+        Node WSS tunnel (/node/connect)
+        Bootstrap enrollment (/bootstrap/*)
+        Router + live registry
+    end note
     database "Live Node Registry" as Registry
     note right of Registry
         Per node:
@@ -52,7 +58,7 @@ node "Orchestrator" {
 
 package "Inference Nodes (The Fleet)" {
     node "MacBook (Apple Silicon)" {
-        [Inference Backend\n(MLX)] as Mac
+        [Inference Backend\n(llama.swift; MLX future)] as Mac
     }
     node "Linux Host (NVIDIA)" {
         [Inference Backend\n(vLLM / CUDA)] as LinuxNv

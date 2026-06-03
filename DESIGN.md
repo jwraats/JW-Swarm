@@ -2,7 +2,7 @@
 
 This document describes the architecture and implementation plan for **JW Swarm (Joint Weights)**, a distributed LLM inference cluster that combines personal MacBooks and GPU servers into a single OpenAI-compatible backend.
 
-For the high-level concept and architecture diagram, see [README.md](README.md) and [architecture.puml](architecture.puml).
+For the high-level concept and architecture diagram, see [README.md](README.md) and [architecture.puml](architecture.puml). For the end-to-end runtime flow (enrollment, registration, dispatch, earnings) see [sequence.puml](sequence.puml).
 
 ---
 
@@ -30,7 +30,7 @@ Developer → Opencode → HAProxy → Fleet Manager → (tunnel) → Inference 
 | Component       | Stack                                  | Notes                                            |
 | --------------- | -------------------------------------- | ------------------------------------------------ |
 | Fleet Manager   | Rust                                   | High-concurrency WebSocket fan-out, single binary |
-| macOS node      | Swift / SwiftUI menu-bar app           | MLX backend                                      |
+| macOS node      | Swift / SwiftUI menu-bar app           | `llama.swift` backend today; MLX remains future work |
 | Windows node    | C# / WinUI 3 system-tray app           | vLLM (CUDA) / llama.cpp (ROCm)                   |
 | Linux node      | Rust CLI `jw-swarm-node` + systemd     | vLLM (CUDA) / llama.cpp (ROCm)                   |
 | Transport       | WebSocket Secure (WSS) + mTLS          | Outbound from node, bidirectional                |
@@ -88,7 +88,7 @@ Each model has a **developer-facing alias** (e.g. `qwen3-coder`) that stays the 
 
 | Vendor        | Backend          | Artifact kind            |
 | ------------- | ---------------- | ------------------------ |
-| Apple Silicon | MLX              | MLX-format weights       |
+| Apple Silicon | `llama.swift` today (`mlx` future) | single-file llama.cpp-compatible artifact |
 | NVIDIA        | vLLM (CUDA)      | safetensors / HF repo    |
 | AMD           | llama.cpp (ROCm) | GGUF                     |
 | Intel         | llama.cpp (SYCL/Vulkan) | GGUF              |
@@ -102,8 +102,8 @@ display_name = "Qwen3 Coder"
 
 [[model.variant]]
 vendor = "apple"            # nvidia | amd | apple | intel
-backend = "mlx"             # vllm | llama.cpp | mlx
-download_url = "https://example.com/qwen3-coder-mlx"
+   backend = "llama.cpp"       # vllm | llama.cpp | mlx
+   download_url = "https://example.com/qwen3-coder-apple.gguf"
 sha256 = "..."
 size_bytes = 4200000000
 context_length = 32768
@@ -209,7 +209,7 @@ Each node app implements the same responsibilities:
 2. **Catalog fetch + model download** — pull the vendor-resolved catalog, then for each alias in the owner's `selected_models`, match it (by `id`) to a `CatalogResponse` entry and download that entry's vendor-specific `download_url` into the app data dir, verifying `sha256`. Aliases with no variant for this node's vendor are skipped and reported as not ready.
 3. **Config store** — owner settings persisted locally: GPU power %, memory limit, schedule/sleep windows, selected models.
 4. **Backend manager** — start/stop the inference backend with best-effort limit flags. The backend and artifact are chosen from the alias variant the Fleet Manager resolved for this node's GPU vendor:
-   - Apple Silicon → MLX (`mlx_lm.server`)
+   - Apple Silicon → currently `llama.swift` / llama.cpp-compatible artifact loading on-device. Direct Hugging Face MLX repo execution is not implemented yet.
    - NVIDIA → vLLM (CUDA), `--gpu-memory-utilization`
    - AMD → llama.cpp (ROCm)
    - Intel → llama.cpp (SYCL/Vulkan)
@@ -222,6 +222,41 @@ Each node app implements the same responsibilities:
 - Nodes initiate **outbound** connections only — no inbound ports or static IPs required on the node side.
 - Model artifacts are verified by **sha256** against the catalog before use.
 
+### 9.1 Bootstrap Enrollment
+
+Issuing and distributing per-node client certificates by hand is error-prone and risks copying private keys between machines. The Fleet Manager therefore exposes an optional **bootstrap enrollment API** (HTTP, served alongside `/v1/*`, in front of HAProxy) so a node can self-provision a certificate while its private key never leaves the node.
+
+#### Flow
+
+1. **Admin issues a token** — `POST /bootstrap/tokens` (Bearer admin token) creates a one-time token bound to a specific `node_id`, with a TTL. The token is stored **hashed** (SHA-256) in the DB; only the hash is persisted.
+2. **Node fetches the CA** — `GET /bootstrap/ca.crt` returns the trust CA certificate.
+3. **Node generates a key + CSR** locally (CN = `node_id`) and submits `POST /bootstrap/enroll` with `node_id`, `token`, and `csr_pem`.
+4. **Fleet Manager signs** the CSR with the private CA, **consumes** the one-time token (marking `used_at`), and returns the signed client cert plus the CA cert.
+5. The node stores `node.pem` (key + cert) and `ca.crt`, then opens the WSS + mTLS tunnel.
+
+#### Endpoints
+
+| Endpoint                                   | Method   | Auth         | Purpose                                        |
+| ------------------------------------------ | -------- | ------------ | ---------------------------------------------- |
+| `/bootstrap/ca.crt`                        | `GET`    | none         | Download the trust CA certificate.             |
+| `/bootstrap/tokens`                        | `POST`   | admin Bearer | Create a one-time `node_id`-bound token.       |
+| `/bootstrap/enroll`                        | `POST`   | one-time token | Submit CSR + token, receive signed cert.     |
+| `/admin/enrollment/tokens`                 | `GET`/`POST` | admin Bearer | List or create enrollment tokens.          |
+| `/admin/enrollment/tokens/{token_hash}`    | `DELETE` | admin Bearer | Revoke a token immediately.                    |
+
+#### Configuration (environment variables)
+
+| Variable                      | Default                      | Purpose                                          |
+| ----------------------------- | ---------------------------- | ------------------------------------------------ |
+| `JW_ENROLL_ENABLE`            | `false`                      | Enable the enrollment API.                       |
+| `JW_ENROLL_CA_CERT`           | `/etc/jw-swarm/ca/ca.crt`    | CA certificate used to sign node CSRs.           |
+| `JW_ENROLL_CA_KEY`            | `/etc/jw-swarm/ca/ca.key`    | CA private key used to sign node CSRs.            |
+| `JW_ENROLL_ADMIN_TOKEN`       | _(unset)_                    | Bearer token guarding token-management routes.   |
+| `JW_ENROLL_TOKEN_TTL_SECONDS` | `600`                        | Default token lifetime (clamped 60–86400).        |
+| `JW_ENROLL_CERT_DAYS`         | `30`                         | Validity of issued client certificates.          |
+
+When enrollment is disabled, every bootstrap/enrollment route returns `404`, and operators provision certs manually (see [jw-swarm-fleet-manager/SETUP.md](jw-swarm-fleet-manager/SETUP.md) §7).
+
 ## 10. Limits Enforcement
 
 Best-effort, via backend launch flags (e.g. vLLM `--gpu-memory-utilization`, llama.cpp layer/mem flags). Hard OS-level isolation (cgroups, MPS, job objects) is out of scope for the first iteration.
@@ -231,6 +266,7 @@ Best-effort, via backend launch flags (e.g. vLLM `--gpu-memory-utilization`, lla
 - **P1 — Protocol & catalog** *(this iteration)*: JSON schema in `proto/`, message spec, `config/models.toml` format.
 - **P2 — Fleet Manager** *(this iteration)*: registry, WS endpoint, catalog service, router, OpenAI HTTP API + dispatcher.
 - **P2.5 — Persistence & earnings**: SQLite (`sqlx`) schema + migrations, node/session/delivery recording, points accounting service, read-only earnings/admin API.
+- **P2.6 — Bootstrap enrollment**: one-time token issuance, CA download, CSR signing API; self-service node certificate provisioning (see [§9.1](#91-bootstrap-enrollment)).
 - **P3 — Linux node** (Rust `jw-swarm-node` + systemd) — reference node implementation.
 - **P4 — macOS node** (Swift/SwiftUI menu-bar app).
 - **P5 — Windows node** (C#/WinUI 3 tray app).

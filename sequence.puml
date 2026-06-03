@@ -1,0 +1,95 @@
+@startuml JW-Swarm-Flow
+title JW Swarm (Joint Weights) — End-to-End Flow
+
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam ParticipantPadding 12
+skinparam BoxPadding 10
+skinparam sequence {
+    ArrowColor #4A6FA5
+    LifeLineBorderColor #4A6FA5
+    ParticipantBorderColor #4A6FA5
+    ParticipantBackgroundColor #F7F9FC
+    ActorBorderColor #4A6FA5
+    ActorBackgroundColor #F7F9FC
+}
+
+actor "Developer\n(Opencode)" as Dev
+participant "HAProxy\n(:443, TLS + mTLS)" as HAProxy
+participant "Fleet Manager\n(Rust orchestrator)" as FM
+database "Persistent DB\n(SQLite)" as DB
+participant "Inference Node\n(Mac / Linux / Windows)" as Node
+
+== Phase 1 — Bootstrap enrollment (one-time, HTTP) ==
+
+note over FM: Admin enables enrollment\n(JW_ENROLL_ENABLE=true)
+Dev -> FM : POST /bootstrap/tokens\n(Bearer admin token, node_id)
+FM -> DB : insert one-time enrollment token (hashed)
+FM --> Dev : { token, expires_at }
+note right of Dev: Operator shares node_id + token\nwith the node owner (out of band)
+
+Node -> Node : generate RSA key + CSR (CN = node_id)
+Node -> HAProxy : GET /bootstrap/ca.crt
+HAProxy -> FM : forward
+FM --> Node : CA certificate (PEM)
+Node -> HAProxy : POST /bootstrap/enroll\n(node_id, token, csr_pem)
+HAProxy -> FM : forward
+FM -> FM : sign CSR with private CA
+FM -> DB : consume one-time token
+FM --> Node : signed client cert + CA cert
+note right of Node: Node stores node.pem (key+cert)\n+ ca.crt for mTLS
+
+== Phase 2 — Tunnel connect & registration (WSS + mTLS) ==
+
+Node -> HAProxy : WSS connect /node/connect\n(presents client cert)
+HAProxy -> HAProxy : verify client cert against CA
+HAProxy -> FM : upgrade WebSocket (trusted)
+activate FM
+Node -> FM : Register\n(host, os, gpu, limits, selected_models)
+FM -> FM : Registry.upsert_node
+FM -> DB : upsert node + open session
+
+Node -> FM : CatalogRequest
+FM -> FM : resolve catalog for node's GPU vendor
+FM --> Node : CatalogResponse\n(per-alias url, sha256, backend)
+
+loop for each selected alias with a variant
+    Node -> Node : download artifact + verify sha256
+end
+Node -> FM : ModelStatus (ready_models)
+Node -> FM : ScheduleState (awake)
+
+== Phase 3 — Liveness & earnings (continuous) ==
+
+loop every ~5s while connected
+    Node -> FM : Heartbeat (metrics + schedule_state)
+    FM -> FM : Registry.update_metrics
+    FM -> DB : accrue capacity points (while awake)
+end
+
+== Phase 4 — Inference request (OpenAI-compatible) ==
+
+Dev -> HAProxy : POST /v1/chat/completions\n(model alias, messages, stream?)
+HAProxy -> FM : forward
+FM -> FM : pick_node\n(model ready + awake, scored by\nVRAM, TPS, latency, load)
+alt no eligible node
+    FM --> Dev : 503 model unavailable
+else node selected
+    FM -> Node : PromptDispatch\n(request_id, model, payload)
+    loop streamed generation
+        Node -> FM : TokenChunk (request_id, delta)
+        FM --> Dev : SSE chunk (or buffered)
+    end
+    Node -> FM : Done (request_id, usage)
+    FM -> DB : record delivery + credit delivery points
+    FM --> Dev : finish (stop / [DONE])
+end
+
+== Phase 5 — Disconnect ==
+
+Node -> FM : close tunnel
+FM -> FM : Registry.remove_node
+FM -> DB : close session (final awake seconds)
+deactivate FM
+
+@enduml

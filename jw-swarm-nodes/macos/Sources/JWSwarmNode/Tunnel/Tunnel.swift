@@ -1,7 +1,7 @@
 import Foundation
 import Security
 
-class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
+class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate, URLSessionWebSocketDelegate {
     private let fleetURL: URL
     private let nodeCertPath: String
     private let caCertPath: String
@@ -9,9 +9,13 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
     private var session: URLSession?
     private var socket: URLSessionWebSocketTask?
     private var loopTask: Task<Void, Never>?
+    private var keepAliveTask: Task<Void, Never>?
     private var onMessage: ((String) -> Void)?
+    private var onConnectionStateChanged: ((Bool) -> Void)?
     private var backoff: Double = 1
     private var queue: [String] = []
+    private var reconnectingAfterError: Bool = false
+    private var connectionAttempt: UInt64 = 0
 
     private var clientIdentity: SecIdentity?
     private var clientCertChain: [SecCertificate] = []
@@ -29,8 +33,10 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
         loadTLSMaterials()
 
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 20
-        config.timeoutIntervalForResource = 30
+        // Tunnel connections are long-lived; short request/resource timeouts
+        // can terminate healthy WebSocket sessions before heartbeats arrive.
+        config.timeoutIntervalForRequest = 24 * 60 * 60
+        config.timeoutIntervalForResource = 24 * 60 * 60
         self.session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }
 
@@ -54,8 +60,11 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
         let activeTask = stateQueue.sync { () -> Task<Void, Never>? in
             let t = loopTask
             loopTask = nil
+            let ka = keepAliveTask
+            keepAliveTask = nil
             let s = socket
             socket = nil
+            ka?.cancel()
             s?.cancel(with: .goingAway, reason: nil)
             return t
         }
@@ -63,6 +72,7 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
 
         session?.invalidateAndCancel()
         session = nil
+        notifyConnectionState(false)
     }
 
     deinit {
@@ -102,29 +112,52 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
             guard let s = session else {
                 return
             }
+
+            let attempt = stateQueue.sync { () -> UInt64 in
+                connectionAttempt += 1
+                return connectionAttempt
+            }
+            NSLog("[Tunnel] connecting attempt #\(attempt) to \(fleetURL.absoluteString)")
+
             let t = s.webSocketTask(with: fleetURL)
             t.resume()
             stateQueue.sync {
                 socket = t
-                backoff = 1
+                reconnectingAfterError = false
+                keepAliveTask?.cancel()
+                keepAliveTask = Task.detached { [weak self] in
+                    await self?.runKeepAlive(for: t)
+                }
             }
 
             await drainMessages(using: t)
 
-            while let r = try? await t.receive() {
-                switch r {
-                case .string(let s):
-                    let handler = stateQueue.sync { onMessage }
-                    handler?(s)
-                case .data(let d):
-                    if let s = String(data: d, encoding: .utf8) {
+            while !Task.isCancelled {
+                do {
+                    let r = try await t.receive()
+                    switch r {
+                    case .string(let s):
                         let handler = stateQueue.sync { onMessage }
                         handler?(s)
+                    case .data(let d):
+                        if let s = String(data: d, encoding: .utf8) {
+                            let handler = stateQueue.sync { onMessage }
+                            handler?(s)
+                        }
+                    @unknown default:
+                        break
                     }
-                default: break
+                } catch {
+                    NSLog("[Tunnel] receive failed: \(error.localizedDescription)")
+                    break
                 }
             }
 
+            stateQueue.sync {
+                keepAliveTask?.cancel()
+                keepAliveTask = nil
+            }
+            notifyConnectionState(false)
             t.cancel()
 
             let delay = stateQueue.sync { () -> Double in
@@ -133,6 +166,7 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
                 backoff = min(backoff * 2, 60)
                 return current
             }
+            NSLog("[Tunnel] reconnecting in \(String(format: "%.1f", delay))s")
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
         }
     }
@@ -153,7 +187,24 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
         Task.detached { [weak self] in
             guard let self else { return }
             if let sock = self.stateQueue.sync(execute: { self.socket }) {
-                try? await sock.send(.string(text))
+                do {
+                    try await sock.send(.string(text))
+                } catch {
+                    let shouldLog = self.stateQueue.sync { () -> Bool in
+                        if self.reconnectingAfterError {
+                            return false
+                        }
+                        self.reconnectingAfterError = true
+                        return true
+                    }
+                    if shouldLog {
+                        NSLog("[Tunnel] send failed, forcing reconnect: \(error.localizedDescription)")
+                    }
+                    self.stateQueue.sync {
+                        self.queue.append(text)
+                    }
+                    sock.cancel(with: .goingAway, reason: nil)
+                }
                 return
             }
             self.stateQueue.sync {
@@ -162,9 +213,84 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
         }
     }
 
+    private func runKeepAlive(for task: URLSessionWebSocketTask) async {
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            if Task.isCancelled {
+                return
+            }
+
+            do {
+                try await sendPing(on: task)
+            } catch {
+                NSLog("[Tunnel] ping failed, reconnecting: \(error.localizedDescription)")
+                task.cancel(with: .goingAway, reason: nil)
+                return
+            }
+        }
+    }
+
+    private func sendPing(on task: URLSessionWebSocketTask) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            task.sendPing { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+    }
+
     func setIncomingHandler(_ handler: @escaping (String) -> Void) {
         stateQueue.sync {
             onMessage = handler
+        }
+    }
+
+    func setConnectionStateHandler(_ handler: @escaping (Bool) -> Void) {
+        stateQueue.sync {
+            onConnectionStateChanged = handler
+        }
+    }
+
+    private func notifyConnectionState(_ connected: Bool) {
+        let handler = stateQueue.sync { onConnectionStateChanged }
+        handler?(connected)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        webSocketTask: URLSessionWebSocketTask,
+        didOpenWithProtocol `protocol`: String?
+    ) {
+        stateQueue.sync {
+            reconnectingAfterError = false
+            backoff = 1
+        }
+        NSLog("[Tunnel] connected")
+        notifyConnectionState(true)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        webSocketTask: URLSessionWebSocketTask,
+        didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
+        reason: Data?
+    ) {
+        let reasonText: String
+        if let reason, let str = String(data: reason, encoding: .utf8), !str.isEmpty {
+            reasonText = str
+        } else {
+            reasonText = "-"
+        }
+        NSLog("[Tunnel] closed (code=\(closeCode.rawValue), reason=\(reasonText))")
+        notifyConnectionState(false)
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error {
+            NSLog("[Tunnel] task completed with error: \(error.localizedDescription)")
         }
     }
 
@@ -194,7 +320,7 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
             let anchors = tlsQueue.sync { caCertificates }
             if !anchors.isEmpty {
                 SecTrustSetAnchorCertificates(trust, anchors as CFArray)
-                SecTrustSetAnchorCertificatesOnly(trust, true)
+                SecTrustSetAnchorCertificatesOnly(trust, false)
             }
 
             var error: CFError?
@@ -217,6 +343,8 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
             throw NSError(domain: "TunnelTLS", code: 1, userInfo: [NSLocalizedDescriptionKey: "node cert file missing at \(url.path)"])
         }
 
+        let temporaryPKCS12Password = "jwswarm-temp"
+
         let ext = url.pathExtension.lowercased()
         if ext == "p12" || ext == "pfx" {
             let data = try Data(contentsOf: url)
@@ -233,7 +361,7 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
             "-in", url.path,
             "-inkey", url.path,
             "-out", temp.path,
-            "-passout", "pass:",
+            "-passout", "pass:\(temporaryPKCS12Password)",
         ]
         let output = try runOpenSSL(args: args)
         if output.exitCode != 0 {
@@ -241,7 +369,7 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate {
         }
 
         let p12 = try Data(contentsOf: temp)
-        return try importPKCS12(data: p12, password: "")
+        return try importPKCS12(data: p12, password: temporaryPKCS12Password)
     }
 
     private func importPKCS12(data: Data, password: String) throws -> (identity: SecIdentity, chain: [SecCertificate]) {

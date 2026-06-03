@@ -20,7 +20,8 @@ enum ConnectionDiagnostics {
         }
 
         let port = url.port ?? ((url.scheme == "wss" || url.scheme == "https") ? 443 : 80)
-        lines.append("Fleet endpoint: \(host):\(port)\(url.path.isEmpty ? "/" : url.path)")
+        let tunnelPath = url.path.isEmpty ? "/node/connect" : url.path
+        lines.append("Fleet endpoint: \(host):\(port)\(tunnelPath)")
 
         let nodeCert = config.node_cert
         let caCert = config.ca_cert
@@ -77,7 +78,6 @@ enum ConnectionDiagnostics {
                 "-cert", nodeCert,
                 "-key", nodeCert,
                 "-verify_return_error",
-                "-brief",
             ],
             timeoutSeconds: 8
         )
@@ -88,18 +88,69 @@ enum ConnectionDiagnostics {
         let verified = mtlsOutput.localizedCaseInsensitiveContains("verification: ok") ||
             mtlsOutput.localizedCaseInsensitiveContains("verify return code: 0")
         let connected = mtlsOutput.localizedCaseInsensitiveContains("connection established") ||
-            mtlsOutput.localizedCaseInsensitiveContains("connected")
+            mtlsOutput.localizedCaseInsensitiveContains("connected") ||
+            mtlsOutput.contains("CONNECTED(")
 
-        let ok = mtls.timedOut == false && mtls.exitCode == 0 && verified && connected
+        let mtlsOk = mtls.timedOut == false && mtls.exitCode == 0 && verified && connected
+
+        // Verify end-to-end node tunnel path with a real WebSocket upgrade request.
+        let tunnelURL: String = {
+            var comps = URLComponents()
+            comps.scheme = (url.scheme == "wss" || url.scheme == "https") ? "https" : "http"
+            comps.host = host
+            comps.port = url.port
+            comps.path = tunnelPath
+            return comps.url?.absoluteString ?? ""
+        }()
+
+        let wsProbe = runOpenSSL(
+            args: [
+                "s_client",
+                "-connect", "\(host):\(port)",
+                "-servername", host,
+                "-CAfile", caCert,
+                "-cert", nodeCert,
+                "-key", nodeCert,
+                "-verify_return_error",
+                "-quiet",
+            ],
+            inputText: [
+                "GET \(tunnelPath) HTTP/1.1",
+                "Host: \(host)",
+                "Connection: Upgrade",
+                "Upgrade: websocket",
+                // RFC 6455 example nonce (16 bytes base64) to satisfy strict validators.
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+                "Sec-WebSocket-Version: 13",
+                "",
+                "",
+            ].joined(separator: "\r\n"),
+            timeoutSeconds: 8
+        )
+
+        let wsOutput = trim(wsProbe.output)
+        lines.append("\nWebSocket upgrade probe (\(tunnelURL)):\n\(wsOutput)")
+
+        let wsAccepted = wsOutput.localizedCaseInsensitiveContains("101 Switching Protocols")
+        let wsForbidden = wsOutput.localizedCaseInsensitiveContains(" 403")
+        let wsBadRequest = wsOutput.localizedCaseInsensitiveContains(" 400")
+
+        let ok = mtlsOk && wsAccepted
         let summary: String
         if ok {
-            summary = "Connection OK (mTLS verified)"
+            summary = "Connection OK (mTLS + tunnel upgrade)"
         } else if mtls.timedOut {
             summary = "Connection test timed out"
         } else if mtls.exitCode != 0 {
             summary = "Connection failed (mTLS handshake failed)"
+        } else if wsProbe.timedOut {
+            summary = "Connection failed (tunnel upgrade timed out)"
+        } else if wsForbidden {
+            summary = "Connection failed (tunnel path denied: 403)"
+        } else if wsBadRequest {
+            summary = "Connection failed (tunnel upgrade rejected: 400)"
         } else {
-            summary = "Connection uncertain (check details)"
+            summary = "Connection failed (tunnel upgrade not accepted)"
         }
 
         return MTLSDiagnosticsResult(
@@ -113,7 +164,11 @@ enum ConnectionDiagnostics {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func runOpenSSL(args: [String], timeoutSeconds: TimeInterval) -> (exitCode: Int32, output: String, timedOut: Bool) {
+    private static func runOpenSSL(
+        args: [String],
+        inputText: String? = nil,
+        timeoutSeconds: TimeInterval
+    ) -> (exitCode: Int32, output: String, timedOut: Bool) {
         let tool = "/usr/bin/openssl"
         guard FileManager.default.isExecutableFile(atPath: tool) else {
             return (-1, "openssl not available at /usr/bin/openssl", false)
@@ -132,6 +187,11 @@ enum ConnectionDiagnostics {
 
         do {
             try process.run()
+            if let inputText {
+                if let data = inputText.data(using: .utf8) {
+                    inputPipe.fileHandleForWriting.write(data)
+                }
+            }
             inputPipe.fileHandleForWriting.closeFile()
         } catch {
             return (-1, "Failed to start openssl: \(error.localizedDescription)", false)

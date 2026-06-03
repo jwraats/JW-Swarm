@@ -45,9 +45,17 @@ A heterogeneous mix of hosts that connect to the Fleet Manager over a **persiste
 - The tunnel is bidirectional: the Fleet Manager dispatches prompts down it and receives streamed tokens back up the same connection.
 - mTLS ensures only trusted nodes can join the fleet.
 
+Before a node can open that tunnel it must obtain a client certificate. The Fleet Manager exposes an optional **bootstrap enrollment API** so a node can self-provision one without the operator copying private keys around:
+
+1. The operator creates a one-time, `node_id`-bound token (`POST /bootstrap/tokens`).
+2. The node generates its own key + CSR, fetches the CA (`GET /bootstrap/ca.crt`), and submits the CSR with the token (`POST /bootstrap/enroll`).
+3. The Fleet Manager signs the CSR, consumes the token, and returns the signed client certificate.
+
+The node's private key never leaves the node. See the [sequence diagram](sequence.puml) for the full handshake.
+
 Supported node types:
 
-- **MacBook (Apple Silicon)** — runs MLX.
+- **MacBook (Apple Silicon)** — currently runs `llama.swift` / llama.cpp-compatible local models.
 - **Linux Host (NVIDIA)** — runs vLLM on CUDA.
 - **Windows Host (NVIDIA)** — runs vLLM on CUDA.
 - **Windows Host (AMD)** — runs llama.cpp on ROCm.
@@ -67,26 +75,31 @@ Every node:
 4. The Fleet Manager dispatches the prompt **back down the node's persistent tunnel** (Fleet Manager → HAProxy → node); the node generates tokens and streams them back up the same tunnel.
 5. The response flows back through the Fleet Manager and HAProxy to Opencode.
 
+For the complete lifecycle — enrollment, tunnel connect, registration, catalog download, heartbeats, request dispatch, and earnings — see the [sequence diagram](sequence.puml).
+
 ## Smart Routing Examples
 
 | Workload                 | Target Node                  | Reason                            |
 | ------------------------ | ---------------------------- | --------------------------------- |
 | Large context window     | Linux/Windows NVIDIA host    | High VRAM and throughput          |
-| Fast, small iterations   | MacBook (Apple Silicon, MLX) | Low latency, energy efficient     |
+| Fast, small iterations   | MacBook (Apple Silicon)      | Low latency, energy efficient     |
 | Cost-effective GPU       | Windows AMD host (ROCm)      | Extra capacity on AMD hardware    |
 | Heavy batch generation   | Highest-TPS node             | Maximizes tokens-per-second       |
 
-## Architecture Diagram
+## Diagrams
 
-See [architecture.puml](architecture.puml) for the PlantUML source of the system architecture.
+Two PlantUML diagrams document the system:
 
-To render it, use any PlantUML-compatible tool, for example:
+- [architecture.puml](architecture.puml) — the static component/system architecture.
+- [sequence.puml](sequence.puml) — the end-to-end flow over time: bootstrap enrollment, tunnel connect, registration, catalog download, heartbeats, an inference request, and disconnect.
+
+To render them, use any PlantUML-compatible tool, for example:
 
 ```sh
-plantuml architecture.puml
+plantuml architecture.puml sequence.puml
 ```
 
-Or use the [PlantUML VS Code extension](https://marketplace.visualstudio.com/items?itemName=jebbs.plantuml) to preview it directly in the editor.
+Or use the [PlantUML VS Code extension](https://marketplace.visualstudio.com/items?itemName=jebbs.plantuml) to preview them directly in the editor.
 
 ## Repository Layout
 
@@ -97,6 +110,7 @@ JW-Swarm/
 ├── README.md                  ← you are here (architecture overview)
 ├── DESIGN.md                  ← detailed design & implementation phases
 ├── architecture.puml          ← PlantUML system diagram
+├── sequence.puml              ← PlantUML end-to-end flow diagram
 ├── proto/                     ← shared wire protocol (schema.json + spec)
 ├── jw-swarm-fleet-manager/    ← the orchestrator (Rust) — ships as a Debian package
 │   └── SETUP.md               ← server hosting guide
@@ -120,6 +134,13 @@ JW-Swarm/
 | Join the fleet from Windows         | [jw-swarm-nodes/windows/SETUP.md](jw-swarm-nodes/windows/SETUP.md) |
 | Understand the wire protocol        | [proto/README.md](proto/README.md)                               |
 | See the full design & roadmap       | [DESIGN.md](DESIGN.md)                                            |
+
+## Current Caveats
+
+- The bootstrap enrollment flow is now supported on Fleet Manager and on the macOS/Linux nodes.
+- A node is considered live only after it appears in `/admin/nodes`; models appear in `/v1/models` only after a node reports them as ready.
+- The current macOS implementation does **not** run Hugging Face MLX repos directly. It currently loads llama.cpp-compatible local model files via `llama.swift`, so Apple catalog entries must point at compatible single-file artifacts and must use real `sha256` values.
+- The sample catalog still contains placeholder hashes and example Apple MLX entries; replace those with real production artifacts before expecting models to become ready.
 
 ## Packaging & Releases
 

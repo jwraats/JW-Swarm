@@ -2,7 +2,8 @@
 //!
 //! Each model has a developer-facing **alias** (e.g. `qwen3-coder`) and one or
 //! more hardware-specific **variants**. A variant targets a GPU vendor and
-//! inference backend (e.g. MLX for Apple Silicon, vLLM/CUDA for NVIDIA). The
+//! inference backend (e.g. a llama.cpp-compatible artifact for Apple Silicon,
+//! vLLM/CUDA for NVIDIA). The
 //! Fleet Manager resolves the correct variant for each node based on its GPU
 //! vendor, so the developer always uses the same alias regardless of which
 //! hardware ultimately serves the request.
@@ -113,8 +114,8 @@ mod tests {
 
         [[model.variant]]
         vendor = "apple"
-        backend = "mlx"
-        download_url = "https://example.com/qwen3-coder-mlx"
+        backend = "llama.cpp"
+        download_url = "https://example.com/qwen3-coder-apple.gguf"
         sha256 = "aaa"
         size_bytes = 100
         context_length = 32768
@@ -156,8 +157,8 @@ mod tests {
         let apple = cat.resolve_for(GpuVendor::Apple);
         assert_eq!(apple.len(), 1);
         assert_eq!(apple[0].id, "qwen3-coder");
-        assert!(matches!(apple[0].backend, Backend::Mlx));
-        assert!(apple[0].download_url.ends_with("mlx"));
+        assert!(matches!(apple[0].backend, Backend::LlamaCpp));
+        assert!(apple[0].download_url.ends_with("apple.gguf"));
 
         let nvidia = cat.resolve_for(GpuVendor::Nvidia);
         assert_eq!(nvidia.len(), 2);
