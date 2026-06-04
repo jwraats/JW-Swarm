@@ -69,7 +69,10 @@ pub async fn download_ca(State(state): State<AppState>) -> Response {
     match tokio::fs::read_to_string(&state.enrollment.ca_cert_path).await {
         Ok(ca_pem) => {
             let mut headers = HeaderMap::new();
-            headers.insert(header::CONTENT_TYPE, "application/x-pem-file".parse().unwrap());
+            headers.insert(
+                header::CONTENT_TYPE,
+                "application/x-pem-file".parse().unwrap(),
+            );
             (headers, ca_pem).into_response()
         }
         Err(e) => {
@@ -103,13 +106,18 @@ pub async fn create_token(
 
     let now = OffsetDateTime::now_utc();
     let expires_at = now + Duration::seconds(ttl);
-    let expires_at_rfc3339 = match expires_at.format(&time::format_description::well_known::Rfc3339) {
+    let expires_at_rfc3339 = match expires_at.format(&time::format_description::well_known::Rfc3339)
+    {
         Ok(v) => v,
         Err(_) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, "time formatting error"),
     };
 
     let node_id = body.node_id.trim().to_string();
-    let token = format!("enr_{}_{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let token = format!(
+        "enr_{}_{}",
+        Uuid::new_v4().simple(),
+        Uuid::new_v4().simple()
+    );
     let token_hash = hash_token(&token);
 
     let created_by = extract_bearer(&headers)
@@ -190,7 +198,10 @@ pub async fn admin_revoke_token(
     }
 }
 
-pub async fn enroll_node(State(state): State<AppState>, Json(body): Json<EnrollRequest>) -> Response {
+pub async fn enroll_node(
+    State(state): State<AppState>,
+    Json(body): Json<EnrollRequest>,
+) -> Response {
     if !state.enrollment.enabled {
         return json_error(StatusCode::NOT_FOUND, "enrollment disabled");
     }
@@ -230,7 +241,9 @@ pub async fn enroll_node(State(state): State<AppState>, Json(body): Json<EnrollR
         }
     };
 
-    let now_rfc3339 = match OffsetDateTime::now_utc().format(&time::format_description::well_known::Rfc3339) {
+    let now_rfc3339 = match OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Rfc3339)
+    {
         Ok(v) => v,
         Err(_) => return json_error(StatusCode::INTERNAL_SERVER_ERROR, "time formatting error"),
     };
