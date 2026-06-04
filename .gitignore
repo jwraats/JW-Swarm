@@ -4,9 +4,12 @@
 
 # Build / packaging
 *.deb
+*.dmg
+*.zip
 dist/
 **/.build/
 **/.swiftpm/
+jw-swarm-nodes/macos/build/
 
 # Logs
 *.log

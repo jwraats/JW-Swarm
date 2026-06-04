@@ -80,6 +80,25 @@ sudo chmod 600 /etc/jw-swarm-node/node.pem
 sudo chmod 644 /etc/jw-swarm-node/ca.crt
 ```
 
+### Optional: bootstrap enrollment via CLI (recommended)
+
+If Fleet Manager bootstrap enrollment is enabled, you can enroll without manually copying PEM files:
+
+```sh
+jw-swarm-node enroll \
+  --base-url https://swarm.example.com \
+  --node-id node-linux-01 \
+  --token '<one-time-token-from-operator>' \
+  --out-dir /etc/jw-swarm-node
+```
+
+This command:
+
+- Generates a local private key and CSR.
+- Downloads `ca.crt` from `/bootstrap/ca.crt`.
+- Exchanges token + CSR at `/bootstrap/enroll`.
+- Writes `node.pem` and updates config with `fleet_url`, `node_cert`, and `ca_cert`.
+
 ## 3. Configure the Node
 
 The node uses a TOML config file with environment variable overrides.

@@ -2,7 +2,7 @@
 
 This guide explains how to host the JW Swarm **Fleet Manager** on a server and put **HAProxy** in front of it for TLS termination, routing, and mTLS authentication of inference nodes.
 
-For the overall architecture see the top-level [README](../README.md) and [DESIGN](../DESIGN.md). For node setup see [jw-swarm-nodes](../jw-swarm-nodes/README.md).
+For the overall architecture see the top-level [README](../README.md) and [DESIGN](../DESIGN.md). For the end-to-end flow (including the enrollment handshake) see [sequence.puml](../sequence.puml). For node setup see [jw-swarm-nodes](../jw-swarm-nodes/README.md).
 
 ---
 
@@ -79,6 +79,8 @@ The Fleet Manager is configured entirely via environment variables:
 | `JW_DB`       | `fleet.db`           | SQLite path for the persistence/earnings store (P2.5).         |
 | `RUST_LOG`    | `info`               | Log level (`error`/`warn`/`info`/`debug`/`trace`).             |
 
+The optional **bootstrap enrollment** API is configured with its own `JW_ENROLL_*` variables — see [§7](#7-mtls-certificates).
+
 ## 6. Run as a systemd service
 
 Create `/etc/systemd/system/jw-fleet-manager.service`:
@@ -149,6 +151,46 @@ cat $NODE.crt $NODE.key > $NODE.pem
 ```
 
 Distribute `ca.crt` + the node's `*.pem` (key+cert) to each node over a secure channel. Keep `ca.key` offline/secret.
+
+### Optional: secure bootstrap enrollment API (easier node onboarding)
+
+Fleet Manager includes a minimal enrollment API that keeps private keys on the node:
+
+- `GET /bootstrap/ca.crt` — download node trust CA cert.
+- `POST /bootstrap/tokens` — admin creates a one-time token bound to `node_id`.
+- `POST /bootstrap/enroll` — node submits `node_id` + `token` + CSR and receives signed client cert.
+
+Enable it with environment variables on Fleet Manager:
+
+```sh
+export JW_ENROLL_ENABLE=true
+export JW_ENROLL_CA_CERT=/etc/jw-swarm/ca/ca.crt
+export JW_ENROLL_CA_KEY=/etc/jw-swarm/ca/ca.key
+export JW_ENROLL_ADMIN_TOKEN='replace-with-strong-random-token'
+
+# Optional tuning
+export JW_ENROLL_TOKEN_TTL_SECONDS=600
+export JW_ENROLL_CERT_DAYS=30
+```
+
+Create one enrollment token for a node:
+
+```sh
+curl -sS -X POST https://swarm.example.com/bootstrap/tokens \
+  -H "authorization: Bearer $JW_ENROLL_ADMIN_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"node_id":"node-macbook-01","ttl_seconds":600}'
+```
+
+The token is one-time and expires automatically.
+
+Admin token management endpoints:
+
+- `POST /admin/enrollment/tokens` (same payload as `/bootstrap/tokens`) creates one token and returns `token` + `token_hash`.
+- `GET /admin/enrollment/tokens` lists existing tokens and their `used_at` / `expires_at`.
+- `DELETE /admin/enrollment/tokens/{token_hash}` revokes a token immediately.
+
+All admin enrollment endpoints require `Authorization: Bearer <JW_ENROLL_ADMIN_TOKEN>`.
 
 The **server** TLS certificate (for `swarm.example.com`) is separate from this CA. With Let's Encrypt, build the PEM HAProxy expects:
 
@@ -228,6 +270,9 @@ curl -s https://swarm.example.com/healthz                 # -> ok
 # Client API (empty until a node connects)
 curl -s https://swarm.example.com/v1/models
 
+# Node registry (local/admin use)
+curl -s http://127.0.0.1:8080/admin/nodes
+
 # A node tunnel without a client cert must be rejected
 curl -s -o /dev/null -w "%{http_code}\n" \
   https://swarm.example.com/node/connect                  # -> 403
@@ -239,6 +284,11 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 ```
 
 Point your inference nodes at `wss://swarm.example.com/node/connect` with their client cert, and Opencode at `https://swarm.example.com/v1` as an OpenAI-compatible base URL.
+
+Catalog note:
+
+- Models only become ready if the catalog entry uses a real artifact URL and a real `sha256`.
+- The current macOS node expects llama.cpp-compatible single-file artifacts on Apple Silicon, not Hugging Face MLX repos.
 
 ## 10. Operations
 

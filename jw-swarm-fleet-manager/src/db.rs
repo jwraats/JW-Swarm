@@ -13,6 +13,16 @@ pub struct Db {
     pool: Arc<SqlitePool>,
 }
 
+#[derive(Debug, Clone)]
+pub struct EnrollmentTokenRow {
+    pub token_hash: String,
+    pub node_id: String,
+    pub created_at: String,
+    pub expires_at: String,
+    pub used_at: Option<String>,
+    pub created_by: String,
+}
+
 impl Db {
     pub async fn connect(path: &str) -> anyhow::Result<Self> {
         let url = format!("sqlite://{path}");
@@ -215,6 +225,97 @@ impl Db {
         tx.commit().await?;
 
         Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    //  enrollment tokens
+    // ------------------------------------------------------------------
+
+    pub async fn insert_enrollment_token(
+        &self,
+        token_hash: &str,
+        node_id: &str,
+        expires_at_rfc3339: &str,
+        created_by: &str,
+    ) -> anyhow::Result<()> {
+        let now =
+            OffsetDateTime::now_utc().format(&::time::format_description::well_known::Rfc3339)?;
+
+        sqlx::query(
+            "INSERT INTO enrollment_tokens (token_hash, node_id, created_at, expires_at, created_by)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(token_hash)
+        .bind(node_id)
+        .bind(&now)
+        .bind(expires_at_rfc3339)
+        .bind(created_by)
+        .execute(&*self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn consume_enrollment_token(
+        &self,
+        token_hash: &str,
+        node_id: &str,
+        now_rfc3339: &str,
+    ) -> anyhow::Result<bool> {
+        let res = sqlx::query(
+            "UPDATE enrollment_tokens
+             SET used_at = ?
+             WHERE token_hash = ?
+               AND node_id = ?
+               AND used_at IS NULL
+               AND expires_at > ?",
+        )
+        .bind(now_rfc3339)
+        .bind(token_hash)
+        .bind(node_id)
+        .bind(now_rfc3339)
+        .execute(&*self.pool)
+        .await?;
+
+        Ok(res.rows_affected() == 1)
+    }
+
+    pub async fn list_enrollment_tokens(&self) -> anyhow::Result<Vec<EnrollmentTokenRow>> {
+        let rows = sqlx::query_as::<_, (String, String, String, String, Option<String>, String)>(
+            "SELECT token_hash, node_id, created_at, expires_at, used_at, created_by
+             FROM enrollment_tokens
+             ORDER BY created_at DESC",
+        )
+        .fetch_all(&*self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| EnrollmentTokenRow {
+                token_hash: r.0,
+                node_id: r.1,
+                created_at: r.2,
+                expires_at: r.3,
+                used_at: r.4,
+                created_by: r.5,
+            })
+            .collect())
+    }
+
+    pub async fn revoke_enrollment_token(&self, token_hash: &str) -> anyhow::Result<bool> {
+        let now =
+            OffsetDateTime::now_utc().format(&::time::format_description::well_known::Rfc3339)?;
+        let res = sqlx::query(
+            "UPDATE enrollment_tokens
+             SET used_at = COALESCE(used_at, ?)
+             WHERE token_hash = ?",
+        )
+        .bind(now)
+        .bind(token_hash)
+        .execute(&*self.pool)
+        .await?;
+
+        Ok(res.rows_affected() == 1)
     }
 
     // ------------------------------------------------------------------

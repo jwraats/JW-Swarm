@@ -1,6 +1,13 @@
 import Foundation
 import LlamaSwift
 
+/// Cumulative token accounting for a single model.
+struct ModelTokenUsage {
+    var inputTokens: UInt64 = 0
+    var outputTokens: UInt64 = 0
+    var requests: UInt64 = 0
+}
+
 final class LlamaBackend: @unchecked Sendable {
     private struct LoadedModel {
         let model: OpaquePointer
@@ -42,6 +49,14 @@ final class LlamaBackend: @unchecked Sendable {
     private var memoryLimitMB: UInt64
     private let queue = DispatchQueue(label: "jwswarm.macos.llama.backend")
 
+    // Throughput stats (protected by `queue`).
+    private var totalCompletionTokens: UInt64 = 0
+    private var totalGenerationSeconds: Double = 0
+    private var lastTps: Double = 0
+
+    // Per-model cumulative token counters (protected by `queue`).
+    private var modelTokenCounts: [String: ModelTokenUsage] = [:]
+
     init(memoryLimitMB: UInt64) {
         self.memoryLimitMB = memoryLimitMB
         llama_backend_init()
@@ -77,6 +92,23 @@ final class LlamaBackend: @unchecked Sendable {
 
     func ready() -> [String] {
         queue.sync { readyModels.sorted() }
+    }
+
+    /// Returns the rolling average tokens/second across all completions and the
+    /// throughput of the most recent generation.
+    func stats() -> (avgTps: Double, lastTps: Double) {
+        queue.sync {
+            let avg = totalGenerationSeconds > 0
+                ? Double(totalCompletionTokens) / totalGenerationSeconds
+                : 0
+            return (avg, lastTps)
+        }
+    }
+
+    /// Cumulative input (prompt) and output (completion) token counts per model
+    /// since the process started.
+    func tokenUsageByModel() -> [String: ModelTokenUsage] {
+        queue.sync { modelTokenCounts }
     }
 
     func dispatch(_ pd: PromptDispatchPayload, sender: @escaping (String) -> Void) {
@@ -197,6 +229,7 @@ final class LlamaBackend: @unchecked Sendable {
 
     private func generate(modelID: String, prompt: String, maxTokens: Int) throws -> (chunks: [String], usage: Usage) {
         let item = try ensureLoaded(modelID: modelID)
+        let generationStart = DispatchTime.now()
 
         let utf8Count = prompt.utf8.count
         var tokens = [llama_token](repeating: 0, count: max(utf8Count + 8, 256))
@@ -277,6 +310,19 @@ final class LlamaBackend: @unchecked Sendable {
                 throw BackendError.decodeFailed
             }
         }
+
+        let elapsed = Double(DispatchTime.now().uptimeNanoseconds - generationStart.uptimeNanoseconds) / 1_000_000_000
+        if elapsed > 0 && !generated.isEmpty {
+            lastTps = Double(generated.count) / elapsed
+            totalCompletionTokens += UInt64(generated.count)
+            totalGenerationSeconds += elapsed
+        }
+
+        var usageForModel = modelTokenCounts[modelID] ?? ModelTokenUsage()
+        usageForModel.inputTokens += UInt64(max(0, tokenCount))
+        usageForModel.outputTokens += UInt64(generated.count)
+        usageForModel.requests += 1
+        modelTokenCounts[modelID] = usageForModel
 
         let usage = Usage(
             prompt_tokens: UInt32(tokenCount),

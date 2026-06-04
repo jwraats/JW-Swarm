@@ -99,26 +99,39 @@ extension PayloadType {
         }
     }
 
-    var rawValue: Any {
-        switch self {
-        case .register(let v): return v
-        case .catalogRequest: return CatalogRequestPayload()
-        case .heartbeat(let v): return v
-        case .modelStatus(let v): return v
-        case .scheduleState(let v): return v
-        case .tokenChunk(let v): return v
-        case .done(let v): return v
-        case .error(let v): return v
-        case .catalogResponse(let v): return v
-        case .promptDispatch(let v): return v
-        }
-    }
-
     func toJSON() throws -> String {
-        let env = TunnelEnvelope(type: messageType, payload: AnyCodable(rawValue))
         let encoder = JSONEncoder()
         encoder.keyEncodingStrategy = .convertToSnakeCase
-        let data = try encoder.encode(env)
+
+        // Unit variant: match serde(tag="type", content="payload") shape by
+        // omitting payload entirely for CatalogRequest.
+        if case .catalogRequest = self {
+            let data = try JSONSerialization.data(withJSONObject: ["type": messageType.rawValue], options: [])
+            return String(data: data, encoding: .utf8) ?? ""
+        }
+
+        // Encode payload with JSONEncoder first so Codable structs become
+        // concrete JSON objects instead of falling back to null.
+        let payloadData: Data
+        switch self {
+        case .register(let v): payloadData = try encoder.encode(v)
+        case .catalogRequest: payloadData = try encoder.encode(CatalogRequestPayload())
+        case .heartbeat(let v): payloadData = try encoder.encode(v)
+        case .modelStatus(let v): payloadData = try encoder.encode(v)
+        case .scheduleState(let v): payloadData = try encoder.encode(v)
+        case .tokenChunk(let v): payloadData = try encoder.encode(v)
+        case .done(let v): payloadData = try encoder.encode(v)
+        case .error(let v): payloadData = try encoder.encode(v)
+        case .catalogResponse(let v): payloadData = try encoder.encode(v)
+        case .promptDispatch(let v): payloadData = try encoder.encode(v)
+        }
+
+        let payloadObject = try JSONSerialization.jsonObject(with: payloadData)
+        let envObject: [String: Any] = [
+            "type": messageType.rawValue,
+            "payload": payloadObject,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: envObject, options: [])
         return String(data: data, encoding: .utf8) ?? ""
     }
 
@@ -126,23 +139,45 @@ extension PayloadType {
         guard let data = string.data(using: .utf8) else {
             throw NSError(domain: "PayloadType", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid UTF-8"])
         }
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let env = try decoder.decode(TunnelEnvelope.self, from: data)
 
-        switch env.type {
-        case .register: return .register(try decodeFromAny(env.payload, RegisterPayload.self))
-        case .catalogRequest: return .catalogRequest
-        case .heartbeat: return .heartbeat(try decodeFromAny(env.payload, HeartbeatPayload.self))
-        case .modelStatus: return .modelStatus(try decodeFromAny(env.payload, ModelStatusPayload.self))
-        case .scheduleState: return .scheduleState(try decodeFromAny(env.payload, ScheduleStatePayload.self))
-        case .tokenChunk: return .tokenChunk(try decodeFromAny(env.payload, TokenChunkPayload.self))
-        case .done: return .done(try decodeFromAny(env.payload, DonePayload.self))
-        case .error: return .error(try decodeFromAny(env.payload, ErrorPayload.self))
-        case .catalogResponse: return .catalogResponse(try decodeFromAny(env.payload, CatalogResponsePayload.self))
-        case .promptDispatch: return .promptDispatch(try decodeFromAny(env.payload, PromptDispatchPayload.self))
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(domain: "PayloadType", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid envelope JSON"])
+        }
+        guard let typeRaw = root["type"] as? String,
+              let type = MessageType(rawValue: typeRaw) else {
+            throw NSError(domain: "PayloadType", code: 3, userInfo: [NSLocalizedDescriptionKey: "Missing or invalid message type"])
+        }
+
+        switch type {
+        case .catalogRequest:
+            return .catalogRequest
+        case .register:
+            return .register(try decodePayload(root, RegisterPayload.self))
+        case .heartbeat:
+            return .heartbeat(try decodePayload(root, HeartbeatPayload.self))
+        case .modelStatus:
+            return .modelStatus(try decodePayload(root, ModelStatusPayload.self))
+        case .scheduleState:
+            return .scheduleState(try decodePayload(root, ScheduleStatePayload.self))
+        case .tokenChunk:
+            return .tokenChunk(try decodePayload(root, TokenChunkPayload.self))
+        case .done:
+            return .done(try decodePayload(root, DonePayload.self))
+        case .error:
+            return .error(try decodePayload(root, ErrorPayload.self))
+        case .catalogResponse:
+            return .catalogResponse(try decodePayload(root, CatalogResponsePayload.self))
+        case .promptDispatch:
+            return .promptDispatch(try decodePayload(root, PromptDispatchPayload.self))
         }
     }
+}
+
+private func decodePayload<T: Decodable>(_ root: [String: Any], _ type: T.Type) throws -> T {
+    let payload = root["payload"] ?? [:]
+    let payloadData = try JSONSerialization.data(withJSONObject: payload)
+    let decoder = JSONDecoder()
+    return try decoder.decode(T.self, from: payloadData)
 }
 
 func decodeFromAny<T: Codable>(_ any: AnyCodable, _ type: T.Type) throws -> T {
@@ -150,7 +185,6 @@ func decodeFromAny<T: Codable>(_ any: AnyCodable, _ type: T.Type) throws -> T {
     encoder.keyEncodingStrategy = .convertToSnakeCase
     let data = try encoder.encode(any)
     let decoder = JSONDecoder()
-    decoder.keyDecodingStrategy = .convertFromSnakeCase
     return try decoder.decode(T.self, from: data)
 }
 

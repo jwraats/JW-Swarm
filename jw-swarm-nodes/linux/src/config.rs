@@ -112,9 +112,19 @@ impl Config {
     pub fn model_dir(&self) -> std::path::PathBuf {
         self.data_dir().join("models")
     }
+
+    pub fn save(&self) -> anyhow::Result<()> {
+        let p = config_path();
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let txt = "# JW Swarm Node\n#\n".to_owned() + &toml::to_string_pretty(self)?;
+        std::fs::write(&p, txt)?;
+        Ok(())
+    }
 }
 
-fn config_path() -> std::path::PathBuf {
+pub fn config_path() -> std::path::PathBuf {
     std::env::var("JW_CONFIG_DIR")
         .ok()
         .map(std::path::PathBuf::from)

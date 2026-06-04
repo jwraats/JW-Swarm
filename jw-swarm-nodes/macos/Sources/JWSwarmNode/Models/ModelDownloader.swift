@@ -5,12 +5,13 @@ final class ModelDownloader {
     static let shared = ModelDownloader()
     private let session = URLSession.shared
 
-    func downloadModel(_ m: CatalogModel) async throws {
+    func downloadModel(_ m: CatalogModel, progress: @escaping (Double) -> Void = { _ in }) async throws {
         let dir = ConfigManager.shared.modelDir().appendingPathComponent(m.id)
         let shaPath = dir.appendingPathComponent("sha256")
         if FileManager.default.fileExists(atPath: shaPath.path) {
             if let existing = try? String(contentsOf: shaPath),
                existing.trimmingCharacters(in: .whitespacesAndNewlines) == m.sha256 {
+                progress(1.0)
                 log("\(m.id) already verified"); return
             }
         }
@@ -20,7 +21,8 @@ final class ModelDownloader {
         let dest = dir.appendingPathComponent(filename)
         log("downloading \(m.id) (\(m.size_bytes) bytes)")
         guard let url = URL(string: m.download_url) else { throw DLE.invalidURL }
-        let (tu, resp) = try await session.download(from: url)
+        let progressDelegate = DownloadProgressDelegate(onProgress: progress)
+        let (tu, resp) = try await session.download(from: url, delegate: progressDelegate)
         guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
             try? FileManager.default.removeItem(at: tu)
             throw DLE.http((resp as? HTTPURLResponse)?.statusCode ?? -1)
@@ -38,6 +40,7 @@ final class ModelDownloader {
             try? FileManager.default.createSymbolicLink(at: legacy, withDestinationURL: dest)
         }
         try m.sha256.write(to: shaPath, atomically: true, encoding: .utf8)
+        progress(1.0)
         log("\(m.id) verified")
     }
 
@@ -54,6 +57,25 @@ final class ModelDownloader {
 
     private func log(_ m: String) { NSLog("[Models] \(m)") }
 }
+
+/// Per-task delegate that reports download progress by observing the task's
+/// `Progress` object. Used with `URLSession.download(from:delegate:)` so the
+/// async API still returns the downloaded file URL.
+final class DownloadProgressDelegate: NSObject, URLSessionTaskDelegate {
+    private let onProgress: (Double) -> Void
+    private var observation: NSKeyValueObservation?
+
+    init(onProgress: @escaping (Double) -> Void) {
+        self.onProgress = onProgress
+    }
+
+    func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
+        observation = task.progress.observe(\.fractionCompleted) { [onProgress] progress, _ in
+            onProgress(progress.fractionCompleted)
+        }
+    }
+}
+
 
 struct SHA256Hasher {
     private var ctx = CC_SHA256_CTX()

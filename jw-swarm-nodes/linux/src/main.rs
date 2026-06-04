@@ -6,6 +6,7 @@ mod config;
 mod proto;
 mod tunnel;
 mod backend;
+mod enroll;
 mod models;
 mod metrics;
 
@@ -23,6 +24,13 @@ async fn main() -> Result<(), anyhow::Error> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(|v| v.as_str()) == Some("enroll") {
+        let enroll_args = enroll::parse_args(&args[2..])?;
+        enroll::run(enroll_args).await?;
+        return Ok(());
+    }
 
     let config = config::Config::load();
     info!(

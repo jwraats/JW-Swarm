@@ -76,6 +76,36 @@ If `JW_NODE_CERT` points to a `.p12` / `.pfx` file, set `JW_NODE_CERT_PASSWORD` 
 
 Or set the paths from the config sheet. The cert/key are **not** stored in the macOS Keychain — the PEM file is read at runtime.
 
+### Fast bootstrap enrollment (recommended)
+
+If Fleet Manager has bootstrap enrollment enabled, use the helper script to generate key + CSR locally and fetch a signed node cert automatically:
+
+```sh
+cd jw-swarm-nodes/macos
+chmod +x enroll-node.sh
+./enroll-node.sh \
+    --base-url https://swarm.example.com \
+    --node-id node-macbook-01 \
+    --token '<one-time-token-from-operator>'
+```
+
+Script output paths are shown at the end and can be pasted directly into the app configuration:
+
+- Node Cert (PEM): `~/.jw-swarm-node/node.pem`
+- CA Cert: `~/.jw-swarm-node/ca.crt`
+- Fleet URL: `wss://swarm.example.com/node/connect`
+
+You can also enroll directly from the macOS app UI:
+
+1. Open menu bar icon -> `Configuration...`
+2. Fill `Fleet URL`.
+3. Paste one-time `Enroll Token` from operator.
+4. Click `Enroll Node (Token)`.
+
+The app generates key+CSR locally, calls Fleet Manager bootstrap endpoints,
+writes certs under the app data directory, updates `node_cert`/`ca_cert`, and
+re-registers automatically.
+
 ### Limits
 
 - **GPU power %** — how much GPU the node commits to the fleet (0–100).
@@ -106,6 +136,21 @@ The macOS node now uses [llama.swift](https://github.com/mattt/llama.swift), whi
 - A compatibility symlink to `weights.bin` is still created.
 - Requests are executed with a greedy decode path and streamed as token chunks.
 - If a model file exceeds the configured memory limit, that model is excluded from `ready_models`.
+- The current macOS node expects llama.cpp-compatible local model files. Direct Hugging Face MLX repo execution is not implemented yet.
+
+## Verify registration
+
+After relaunching the app with valid certs:
+
+```sh
+curl -s https://swarm.example.com/healthz
+curl -s http://127.0.0.1:8080/admin/nodes
+curl -s https://swarm.example.com/v1/models
+```
+
+- The node is registered only when it appears in `/admin/nodes`.
+- A model appears in `/v1/models` only after the node downloads it and reports it in `ready_models`.
+- The included catalog now has an Apple-compatible `qwen35-9b` GGUF example; older Apple `mlx` entries are still placeholders and are intentionally skipped by the current macOS app.
 
 ## Fleet Manager side
 

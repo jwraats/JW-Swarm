@@ -5,6 +5,7 @@ mod admin;
 mod api;
 mod catalog;
 mod db;
+mod enrollment;
 mod proto;
 mod registry;
 mod router;
@@ -13,7 +14,7 @@ mod tunnel;
 
 use std::net::SocketAddr;
 
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -55,6 +56,17 @@ async fn main() -> anyhow::Result<()> {
 fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
+        .route("/bootstrap/ca.crt", get(enrollment::download_ca))
+        .route("/bootstrap/tokens", post(enrollment::create_token))
+        .route("/bootstrap/enroll", post(enrollment::enroll_node))
+        .route(
+            "/admin/enrollment/tokens",
+            get(enrollment::admin_list_tokens).post(enrollment::create_token),
+        )
+        .route(
+            "/admin/enrollment/tokens/{token_hash}",
+            delete(enrollment::admin_revoke_token),
+        )
         .route("/v1/models", get(api::list_models))
         .route("/v1/chat/completions", post(api::chat_completions))
         .route("/node/connect", get(tunnel::node_connect))
