@@ -210,6 +210,12 @@ enum ConnectionDiagnostics {
 
         let data = (try? outPipe.fileHandleForReading.readToEnd()) ?? Data()
         let output = String(data: data, encoding: .utf8) ?? ""
+
+        // `terminate()` only sends SIGTERM; the process may still be running when
+        // we reach here. Reading `terminationStatus` on a live task throws an
+        // NSInvalidArgumentException ("task still running"), so always wait for
+        // the process to actually exit before querying its status.
+        process.waitUntilExit()
         return (process.terminationStatus, output, timedOut)
     }
 }

@@ -16,6 +16,7 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate, URLSessionWebSo
     private var queue: [String] = []
     private var reconnectingAfterError: Bool = false
     private var connectionAttempt: UInt64 = 0
+    private var lastPingRTTms: Double = 0
 
     private var clientIdentity: SecIdentity?
     private var clientCertChain: [SecCertificate] = []
@@ -124,6 +125,7 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate, URLSessionWebSo
             stateQueue.sync {
                 socket = t
                 reconnectingAfterError = false
+                lastPingRTTms = 0
                 keepAliveTask?.cancel()
                 keepAliveTask = Task.detached { [weak self] in
                     await self?.runKeepAlive(for: t)
@@ -214,12 +216,9 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate, URLSessionWebSo
     }
 
     private func runKeepAlive(for task: URLSessionWebSocketTask) async {
+        // Send one ping immediately so latency is available shortly after the
+        // connection opens, then keep pinging on the keepalive interval.
         while !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 20_000_000_000)
-            if Task.isCancelled {
-                return
-            }
-
             do {
                 try await sendPing(on: task)
             } catch {
@@ -227,19 +226,33 @@ class Tunnel: NSObject, @unchecked Sendable, URLSessionDelegate, URLSessionWebSo
                 task.cancel(with: .goingAway, reason: nil)
                 return
             }
+
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            if Task.isCancelled {
+                return
+            }
         }
     }
 
     private func sendPing(on task: URLSessionWebSocketTask) async throws {
+        let start = DispatchTime.now()
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            task.sendPing { error in
+            task.sendPing { [weak self] error in
                 if let error {
                     continuation.resume(throwing: error)
                 } else {
+                    let rtt = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+                    self?.stateQueue.sync { self?.lastPingRTTms = rtt }
                     continuation.resume(returning: ())
                 }
             }
         }
+    }
+
+    /// Round-trip latency (ms) of the most recent WebSocket ping, or `nil` when
+    /// no successful ping has completed on the current connection.
+    func latencyMs() -> Double? {
+        stateQueue.sync { lastPingRTTms > 0 ? lastPingRTTms : nil }
     }
 
     func setIncomingHandler(_ handler: @escaping (String) -> Void) {

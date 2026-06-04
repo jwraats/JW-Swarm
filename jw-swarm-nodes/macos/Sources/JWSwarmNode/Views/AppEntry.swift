@@ -26,11 +26,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private let statusMenuItem = NSMenuItem(title: "Status: Starting...", action: nil, keyEquivalent: "")
     private let tunnelMenuItem = NSMenuItem(title: "Tunnel: Disconnected", action: nil, keyEquivalent: "")
-    private let modelsMenuItem = NSMenuItem(title: "Models: -", action: nil, keyEquivalent: "")
+    private let latencyMenuItem = NSMenuItem(title: "Latency: -", action: nil, keyEquivalent: "")
+    private let tpsMenuItem = NSMenuItem(title: "Avg tok/s: -", action: nil, keyEquivalent: "")
+    private let modelsMenuItem = NSMenuItem(title: "Models: -", action: #selector(openModelsWindow), keyEquivalent: "")
     private let reconnectMenuItem = NSMenuItem(title: "Reconnect Tunnel", action: #selector(reconnectTunnel), keyEquivalent: "")
     private let disconnectMenuItem = NSMenuItem(title: "Disconnect Tunnel", action: #selector(disconnectTunnel), keyEquivalent: "")
     private let awakeMenuItem = NSMenuItem(title: "Awake", action: #selector(toggleAwake), keyEquivalent: "")
     private var configWindowController: ConfigWindowController?
+    private var modelsWindowController: ModelsWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -70,7 +73,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         statusMenuItem.isEnabled = false
         tunnelMenuItem.isEnabled = false
-        modelsMenuItem.isEnabled = false
+        modelsMenuItem.isEnabled = true
+        modelsMenuItem.target = self
+        latencyMenuItem.isEnabled = false
+        tpsMenuItem.isEnabled = false
 
         reconnectMenuItem.target = self
         disconnectMenuItem.target = self
@@ -89,6 +95,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(statusMenuItem)
         menu.addItem(tunnelMenuItem)
+        menu.addItem(latencyMenuItem)
+        menu.addItem(tpsMenuItem)
         menu.addItem(modelsMenuItem)
         menu.addItem(.separator())
         menu.addItem(reconnectMenuItem)
@@ -145,15 +153,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             attributes: [.foregroundColor: tunnelColor]
         )
 
-        if coordinator.readyModels.isEmpty {
-            modelsMenuItem.title = "Models: -"
+        if tunnelConnected, let latency = coordinator.fleetLatencyMs {
+            latencyMenuItem.title = String(format: "Latency: %.0f ms", latency)
         } else {
-            modelsMenuItem.title = "Models: \(coordinator.readyModels.joined(separator: ", "))"
+            latencyMenuItem.title = "Latency: -"
         }
+
+        let avgTps = coordinator.averageTokensPerSecond
+        if avgTps > 0 {
+            tpsMenuItem.title = String(format: "Avg tok/s: %.1f", avgTps)
+        } else {
+            tpsMenuItem.title = "Avg tok/s: -"
+        }
+
+        updateModelsMenu(coordinator)
 
         reconnectMenuItem.isEnabled = true
         disconnectMenuItem.isEnabled = coordinator.canDisconnectTunnel
         awakeMenuItem.state = coordinator.isAwake ? .on : .off
+    }
+
+    private func updateModelsMenu(_ coordinator: NodeCoordinator) {
+        let entries = coordinator.modelStates
+        guard !entries.isEmpty else {
+            modelsMenuItem.title = "Models... (none)"
+            return
+        }
+
+        let readyCount = entries.values.filter { $0.state == .ready }.count
+        modelsMenuItem.title = "Models... (\(readyCount)/\(entries.count) ready)"
+    }
+
+    @objc
+    private func openModelsWindow() {
+        if modelsWindowController == nil {
+            modelsWindowController = ModelsWindowController()
+        }
+        modelsWindowController?.showWindowAndActivate()
     }
 
     @objc
@@ -199,13 +235,49 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 }
 
+/// Download/availability state for a model the node knows about.
+enum ModelDownloadState: Equatable {
+    case available            // present in catalog, not yet downloaded
+    case downloading(Double)  // fraction complete in 0...1
+    case ready                // downloaded, verified and loaded
+    case failed(String)       // download or verification error
+    case unsupported          // backend not runnable on this node
+}
+
+struct ModelStatusEntry {
+    let displayName: String
+    var state: ModelDownloadState
+}
+
 class NodeCoordinator: @unchecked Sendable {
     static let shared = NodeCoordinator()
     var status: String = "Disconnected"
     var readyModels: [String] = []
-    var isAwake: Bool = true
+    /// Whether the node is advertising itself as available for inference. When
+    /// awake the node serves requests and accrues capacity points; when asleep
+    /// the Fleet Manager stops dispatching work to it. Setting this immediately
+    /// notifies the Fleet Manager via a `ScheduleState` message.
+    var isAwake: Bool = true {
+        didSet {
+            guard oldValue != isAwake else { return }
+            doSendScheduleState()
+        }
+    }
     var isTunnelConnected: Bool = false
     var canDisconnectTunnel: Bool { tunnel != nil }
+
+    /// Per-model status surfaced in the menu bar. Keyed by model id and updated
+    /// on the main thread from the catalog / download flow.
+    var modelStates: [String: ModelStatusEntry] = [:]
+
+    /// Rolling average tokens/second across all completions on this node.
+    var averageTokensPerSecond: Double { backend.stats().avgTps }
+    /// Throughput (tokens/second) of the most recent completion.
+    var lastTokensPerSecond: Double { backend.stats().lastTps }
+    /// Cumulative input/output token counts per model since launch.
+    var tokenUsageByModel: [String: ModelTokenUsage] { backend.tokenUsageByModel() }
+    /// Round-trip latency to the Fleet Manager, or nil when not yet measured.
+    var fleetLatencyMs: Double? { tunnel?.latencyMs() }
 
     private var tunnel: Tunnel?
     private var config: AppConfig?
@@ -350,13 +422,25 @@ class NodeCoordinator: @unchecked Sendable {
         guard let c = config, let t = tunnel else { return }
         let m = collectMetrics()
         let met = NodeMetrics(vram_used_mb: m.usedMB, vram_total_mb: m.totalMB,
-                              gpu_util_pct: m.gpuPct, tps: 0, latency_ms: 0, in_flight: 0)
+                              gpu_util_pct: m.gpuPct, tps: backend.stats().avgTps,
+                              latency_ms: tunnel?.latencyMs() ?? 0, in_flight: 0)
         let hb = HeartbeatPayload(node_id: c.node_id, metrics: met,
-                                   schedule_state: .awake)
+                                   schedule_state: isAwake ? .awake : .asleep)
         do {
             let json = try PayloadType.heartbeat(hb).toJSON()
             t.send(json)
         } catch { NSLog("Heartbeat failed: \(error)") }
+    }
+
+    private func doSendScheduleState() {
+        guard let c = config, let t = tunnel else { return }
+        let state: ScheduleStateValue = isAwake ? .awake : .asleep
+        let payload = ScheduleStatePayload(node_id: c.node_id, state: state)
+        do {
+            let json = try PayloadType.scheduleState(payload).toJSON()
+            t.send(json)
+            NSLog("[Node] ScheduleState sent: \(state.rawValue)")
+        } catch { NSLog("ScheduleState failed: \(error)") }
     }
 
     private func doUpdateReadyModels() {
@@ -408,7 +492,19 @@ class NodeCoordinator: @unchecked Sendable {
 
         NSLog("[Node] Catalog filtered: requested=\(requested.count), supported=\(supported.count), unsupported=\(unsupported.count)")
 
+        // Seed per-model status for the menu. Preserve in-progress/ready states.
+        let readyNow = Set(backend.ready())
+        for model in supported {
+            if readyNow.contains(model.id) {
+                modelStates[model.id] = ModelStatusEntry(displayName: model.display_name, state: .ready)
+            } else if case .downloading = modelStates[model.id]?.state {
+                // keep current progress
+            } else {
+                modelStates[model.id] = ModelStatusEntry(displayName: model.display_name, state: .available)
+            }
+        }
         for model in unsupported {
+            modelStates[model.id] = ModelStatusEntry(displayName: model.display_name, state: .unsupported)
             NSLog("Skipping \(model.id): backend \(model.backend.rawValue) is not supported by the current macOS node")
         }
 
@@ -426,6 +522,8 @@ class NodeCoordinator: @unchecked Sendable {
                         return false
                     }
                     NodeCoordinator.shared.downloadingModels.insert(model.id)
+                    NodeCoordinator.shared.modelStates[model.id] =
+                        ModelStatusEntry(displayName: model.display_name, state: .downloading(0))
                     return true
                 }
                 if !shouldStart {
@@ -434,16 +532,27 @@ class NodeCoordinator: @unchecked Sendable {
 
                 do {
                     NSLog("[Node] Download start: \(model.id)")
-                    try await ModelDownloader.shared.downloadModel(model)
+                    try await ModelDownloader.shared.downloadModel(model) { fraction in
+                        Task { @MainActor in
+                            NodeCoordinator.shared.modelStates[model.id] =
+                                ModelStatusEntry(displayName: model.display_name,
+                                                 state: .downloading(fraction))
+                        }
+                    }
                     NSLog("[Node] Download ready: \(model.id)")
                     _ = await MainActor.run {
                         NodeCoordinator.shared.downloadingModels.remove(model.id)
+                        NodeCoordinator.shared.modelStates[model.id] =
+                            ModelStatusEntry(displayName: model.display_name, state: .ready)
                     }
                     NodeCoordinator.shared.backend.register(model.id)
                     NodeCoordinator.shared.doUpdateReadyModels()
                 } catch {
                     _ = await MainActor.run {
                         NodeCoordinator.shared.downloadingModels.remove(model.id)
+                        NodeCoordinator.shared.modelStates[model.id] =
+                            ModelStatusEntry(displayName: model.display_name,
+                                             state: .failed(error.localizedDescription))
                     }
                     NSLog("Download \(model.id) failed: \(error)")
                     NodeCoordinator.shared.doUpdateReadyModels()
