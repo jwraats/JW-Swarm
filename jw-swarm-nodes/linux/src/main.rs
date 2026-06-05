@@ -40,7 +40,7 @@ async fn main() -> Result<(), anyhow::Error> {
     );
 
     let state = State { config: config.clone() };
-    let bf = backend::BackendManager::new();
+    let bf = backend::BackendManager::new(config.limits.memory_limit_mb);
     run(state, bf).await;
     Ok(())
 }
@@ -158,7 +158,7 @@ async fn handle_msg(
                 .to_json()?);
         }
         Message::PromptDispatch(ref pd) => {
-            info!("dispatch {}", pd.request_id);
+            info!("dispatch {} (loaded={:?})", pd.request_id, bf.loaded_model());
             bf.dispatch(pd, h.outbound.clone());
         }
         Message::Error(ref e) => warn!("srv err {}: {}", e.request_id, e.message),

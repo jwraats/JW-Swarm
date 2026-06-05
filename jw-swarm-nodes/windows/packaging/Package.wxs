@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="JW Swarm Node"
+           Manufacturer="JW Swarm"
+           Version="0.1.0.0"
+           UpgradeCode="6f9d2a1e-3b4c-4d5e-9f10-2a3b4c5d6e7f"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of JW Swarm Node is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="JW Swarm Node" />
+    </StandardDirectory>
+
+    <!-- Launch the tray app at user logon -->
+    <Component Id="AutostartRegistry" Directory="INSTALLFOLDER" Guid="6f9d2a1e-3b4c-4d5e-9f10-2a3b4c5d6e80">
+      <RegistryValue Root="HKLM"
+                     Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                     Name="JwSwarmNode"
+                     Type="string"
+                     Value="&quot;[INSTALLFOLDER]JwSwarmNode.exe&quot;" />
+    </Component>
+
+    <Feature Id="Main" Title="JW Swarm Node" Level="1">
+      <!-- Files published by `dotnet publish` (see build-msi.ps1) -->
+      <Files Include="!(bindpath.PublishDir)\**" Directory="INSTALLFOLDER" />
+      <ComponentRef Id="AutostartRegistry" />
+    </Feature>
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+
+  </Package>
+</Wix>

@@ -1,0 +1,7 @@
+# .NET build output
+bin/
+obj/
+publish/
+
+# WiX intermediate output
+*.wixpdb
