@@ -14,6 +14,7 @@ final class ModelsWindowController: NSWindowController, NSTableViewDataSource, N
     private var refreshTimer: Timer?
     private var rows: [(id: String, entry: ModelStatusEntry)] = []
     private var usage: [String: ModelTokenUsage] = [:]
+    private var loadedModelIDs: Set<String> = []
 
     init() {
         let window = NSWindow(
@@ -165,6 +166,7 @@ final class ModelsWindowController: NSWindowController, NSTableViewDataSource, N
         rows = coordinator.modelStates
             .sorted { $0.key < $1.key }
             .map { (id: $0.key, entry: $0.value) }
+        loadedModelIDs = Set(coordinator.loadedModels)
         usage = coordinator.tokenUsageByModel
 
         let totalIn = usage.values.reduce(UInt64(0)) { $0 + $1.inputTokens }
@@ -194,7 +196,7 @@ final class ModelsWindowController: NSWindowController, NSTableViewDataSource, N
         case "name":
             return cell(text: entry.displayName, color: .labelColor)
         case "state":
-            return cell(text: stateText(entry.state), color: stateColor(entry.state))
+            return cell(text: stateText(entry.state, modelID: modelID), color: stateColor(entry.state, modelID: modelID))
         case "progress":
             if case .downloading(let fraction) = entry.state {
                 let bar = NSProgressIndicator()
@@ -236,19 +238,21 @@ final class ModelsWindowController: NSWindowController, NSTableViewDataSource, N
         return field
     }
 
-    private func stateText(_ state: ModelDownloadState) -> String {
+    private func stateText(_ state: ModelDownloadState, modelID: String) -> String {
         switch state {
         case .available: return "Available"
         case .downloading(let f): return String(format: "Downloading %.0f%%", f * 100)
-        case .ready: return "Ready"
+        case .ready:
+            return loadedModelIDs.contains(modelID) ? "Loaded" : "Ready"
         case .failed(let reason): return "Failed: \(reason)"
         case .unsupported: return "Unsupported"
         }
     }
 
-    private func stateColor(_ state: ModelDownloadState) -> NSColor {
+    private func stateColor(_ state: ModelDownloadState, modelID: String) -> NSColor {
         switch state {
-        case .ready: return .systemGreen
+        case .ready:
+            return loadedModelIDs.contains(modelID) ? .systemGreen : .secondaryLabelColor
         case .downloading: return .systemBlue
         case .failed: return .systemRed
         case .unsupported: return .systemOrange

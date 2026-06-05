@@ -13,6 +13,7 @@ final class LlamaBackend: @unchecked Sendable {
         let model: OpaquePointer
         let context: OpaquePointer
         let vocab: OpaquePointer
+        let residentSizeMB: UInt64
     }
 
     private enum BackendError: Error, LocalizedError {
@@ -46,6 +47,7 @@ final class LlamaBackend: @unchecked Sendable {
 
     private var readyModels: Set<String> = []
     private var loaded: [String: LoadedModel] = [:]
+    private var loadedOrder: [String] = []
     private var memoryLimitMB: UInt64
     private let queue = DispatchQueue(label: "jwswarm.macos.llama.backend")
 
@@ -77,6 +79,7 @@ final class LlamaBackend: @unchecked Sendable {
         queue.sync {
             memoryLimitMB = value
             unloadOversizedModelsIfNeeded()
+            trimLoadedModelsToFitBudget(preferredModelID: nil)
         }
     }
 
@@ -92,6 +95,10 @@ final class LlamaBackend: @unchecked Sendable {
 
     func ready() -> [String] {
         queue.sync { readyModels.sorted() }
+    }
+
+    func loadedModelIDs() -> [String] {
+        queue.sync { loadedOrder }
     }
 
     /// Returns the rolling average tokens/second across all completions and the
@@ -149,10 +156,9 @@ final class LlamaBackend: @unchecked Sendable {
         let ids = Array(loaded.keys)
         for id in ids {
             guard let file = modelFile(for: id),
-                  let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
-                  let bytes = attrs[.size] as? UInt64 else { continue }
-            let sizeMB = bytes / (1024 * 1024)
+                  let sizeMB = try? modelSizeMB(for: file) else { continue }
             if sizeMB > memoryLimitMB, let loadedItem = loaded.removeValue(forKey: id) {
+                loadedOrder.removeAll { $0 == id }
                 llama_free(loadedItem.context)
                 llama_model_free(loadedItem.model)
                 readyModels.remove(id)
@@ -165,12 +171,17 @@ final class LlamaBackend: @unchecked Sendable {
         guard let file = modelFile(for: id) else {
             throw BackendError.modelFileMissing(id)
         }
-        let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
-        let bytes = (attrs[.size] as? UInt64) ?? 0
-        let sizeMB = max(1, bytes / (1024 * 1024))
+        let sizeMB = try modelSizeMB(for: file)
         if sizeMB > memoryLimitMB {
             throw BackendError.modelTooLarge(model: id, sizeMB: sizeMB, limitMB: memoryLimitMB)
         }
+    }
+
+    private func modelSizeMB(for file: URL) throws -> UInt64 {
+        let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
+        let bytes = (attrs[.size] as? UInt64) ?? 0
+        let mb = (bytes + (1024 * 1024) - 1) / (1024 * 1024)
+        return max(1, mb)
     }
 
     private func modelFile(for id: String) -> URL? {
@@ -191,6 +202,7 @@ final class LlamaBackend: @unchecked Sendable {
 
     private func ensureLoaded(modelID: String) throws -> LoadedModel {
         if let existing = loaded[modelID] {
+            touchLoadedModel(modelID)
             return existing
         }
 
@@ -199,6 +211,9 @@ final class LlamaBackend: @unchecked Sendable {
         guard let file = modelFile(for: modelID) else {
             throw BackendError.modelFileMissing(modelID)
         }
+
+        let modelSizeMB = try modelSizeMB(for: file)
+        trimLoadedModelsToFitBudget(preferredModelID: nil, reservingMB: modelSizeMB)
 
         let model = try file.path.withCString { pathPtr -> OpaquePointer in
             let modelParams = llama_model_default_params()
@@ -222,9 +237,46 @@ final class LlamaBackend: @unchecked Sendable {
             llama_model_free(model)
             throw BackendError.contextInitFailed(modelID)
         }
-        let item = LoadedModel(model: model, context: context, vocab: vocab)
+        let item = LoadedModel(model: model, context: context, vocab: vocab, residentSizeMB: modelSizeMB)
         loaded[modelID] = item
+        touchLoadedModel(modelID)
+        trimLoadedModelsToFitBudget(preferredModelID: modelID)
         return item
+    }
+
+    private func touchLoadedModel(_ id: String) {
+        loadedOrder.removeAll { $0 == id }
+        loadedOrder.append(id)
+    }
+
+    private func loadedResidentMemoryMB(excluding excludedID: String? = nil) -> UInt64 {
+        loaded.reduce(into: 0) { partialResult, entry in
+            if entry.key != excludedID {
+                partialResult += entry.value.residentSizeMB
+            }
+        }
+    }
+
+    private func trimLoadedModelsToFitBudget(preferredModelID: String?, reservingMB: UInt64 = 0) {
+        while loadedResidentMemoryMB(excluding: preferredModelID) + reservingMB > memoryLimitMB {
+            guard let candidateID = loadedOrder.first(where: { $0 != preferredModelID }) else {
+                break
+            }
+            unloadLoadedModel(candidateID, removeFromReady: false, reason: "resident memory budget \(memoryLimitMB)MB")
+        }
+    }
+
+    private func unloadLoadedModel(_ id: String, removeFromReady: Bool, reason: String) {
+        guard let loadedItem = loaded.removeValue(forKey: id) else {
+            return
+        }
+        loadedOrder.removeAll { $0 == id }
+        llama_free(loadedItem.context)
+        llama_model_free(loadedItem.model)
+        if removeFromReady {
+            readyModels.remove(id)
+        }
+        NSLog("[Backend] unloaded \(id) due to \(reason)")
     }
 
     private func generate(modelID: String, prompt: String, maxTokens: Int) throws -> (chunks: [String], usage: Usage) {

@@ -29,6 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let latencyMenuItem = NSMenuItem(title: "Latency: -", action: nil, keyEquivalent: "")
     private let tpsMenuItem = NSMenuItem(title: "Avg tok/s: -", action: nil, keyEquivalent: "")
     private let modelsMenuItem = NSMenuItem(title: "Models: -", action: #selector(openModelsWindow), keyEquivalent: "")
+    private let loadedModelMenuItem = NSMenuItem(title: "Loaded model: -", action: nil, keyEquivalent: "")
     private let reconnectMenuItem = NSMenuItem(title: "Reconnect Tunnel", action: #selector(reconnectTunnel), keyEquivalent: "")
     private let disconnectMenuItem = NSMenuItem(title: "Disconnect Tunnel", action: #selector(disconnectTunnel), keyEquivalent: "")
     private let awakeMenuItem = NSMenuItem(title: "Awake", action: #selector(toggleAwake), keyEquivalent: "")
@@ -75,6 +76,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tunnelMenuItem.isEnabled = false
         modelsMenuItem.isEnabled = true
         modelsMenuItem.target = self
+        loadedModelMenuItem.isEnabled = false
         latencyMenuItem.isEnabled = false
         tpsMenuItem.isEnabled = false
 
@@ -98,6 +100,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(latencyMenuItem)
         menu.addItem(tpsMenuItem)
         menu.addItem(modelsMenuItem)
+        menu.addItem(loadedModelMenuItem)
         menu.addItem(.separator())
         menu.addItem(reconnectMenuItem)
         menu.addItem(disconnectMenuItem)
@@ -175,13 +178,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateModelsMenu(_ coordinator: NodeCoordinator) {
         let entries = coordinator.modelStates
+        let loaded = coordinator.loadedModels
+        if loaded.isEmpty {
+            loadedModelMenuItem.title = "Loaded model: none"
+        } else if loaded.count == 1 {
+            loadedModelMenuItem.title = "Loaded model: \(loaded[0])"
+        } else {
+            loadedModelMenuItem.title = "Loaded models: \(loaded.joined(separator: ", "))"
+        }
+
         guard !entries.isEmpty else {
             modelsMenuItem.title = "Models... (none)"
             return
         }
 
         let readyCount = entries.values.filter { $0.state == .ready }.count
-        modelsMenuItem.title = "Models... (\(readyCount)/\(entries.count) ready)"
+        modelsMenuItem.title = "Models... (\(readyCount)/\(entries.count) ready, \(loaded.count) loaded)"
     }
 
     @objc
@@ -249,6 +261,11 @@ struct ModelStatusEntry {
     var state: ModelDownloadState
 }
 
+private struct ModelCatalogFingerprint: Hashable {
+    let downloadURL: String
+    let sha256: String
+}
+
 class NodeCoordinator: @unchecked Sendable {
     static let shared = NodeCoordinator()
     var status: String = "Disconnected"
@@ -276,6 +293,8 @@ class NodeCoordinator: @unchecked Sendable {
     var lastTokensPerSecond: Double { backend.stats().lastTps }
     /// Cumulative input/output token counts per model since launch.
     var tokenUsageByModel: [String: ModelTokenUsage] { backend.tokenUsageByModel() }
+    /// Models currently resident in memory in the backend.
+    var loadedModels: [String] { backend.loadedModelIDs() }
     /// Round-trip latency to the Fleet Manager, or nil when not yet measured.
     var fleetLatencyMs: Double? { tunnel?.latencyMs() }
 
@@ -286,6 +305,7 @@ class NodeCoordinator: @unchecked Sendable {
     private var heartbeatTask: Task<Void, Never>?
     private var catalogPollTask: Task<Void, Never>?
     private var downloadingModels: Set<String> = []
+    private var failedModelFingerprints: [String: ModelCatalogFingerprint] = [:]
 
     func start(config: AppConfig) {
         self.maintainTunnel = true
@@ -521,6 +541,10 @@ class NodeCoordinator: @unchecked Sendable {
                     if NodeCoordinator.shared.downloadingModels.contains(model.id) {
                         return false
                     }
+                    let fingerprint = ModelCatalogFingerprint(downloadURL: model.download_url, sha256: model.sha256)
+                    if NodeCoordinator.shared.failedModelFingerprints[model.id] == fingerprint {
+                        return false
+                    }
                     NodeCoordinator.shared.downloadingModels.insert(model.id)
                     NodeCoordinator.shared.modelStates[model.id] =
                         ModelStatusEntry(displayName: model.display_name, state: .downloading(0))
@@ -542,6 +566,7 @@ class NodeCoordinator: @unchecked Sendable {
                     NSLog("[Node] Download ready: \(model.id)")
                     _ = await MainActor.run {
                         NodeCoordinator.shared.downloadingModels.remove(model.id)
+                        NodeCoordinator.shared.failedModelFingerprints.removeValue(forKey: model.id)
                         NodeCoordinator.shared.modelStates[model.id] =
                             ModelStatusEntry(displayName: model.display_name, state: .ready)
                     }
@@ -550,11 +575,13 @@ class NodeCoordinator: @unchecked Sendable {
                 } catch {
                     _ = await MainActor.run {
                         NodeCoordinator.shared.downloadingModels.remove(model.id)
+                        NodeCoordinator.shared.failedModelFingerprints[model.id] =
+                            ModelCatalogFingerprint(downloadURL: model.download_url, sha256: model.sha256)
                         NodeCoordinator.shared.modelStates[model.id] =
                             ModelStatusEntry(displayName: model.display_name,
                                              state: .failed(error.localizedDescription))
                     }
-                    NSLog("Download \(model.id) failed: \(error)")
+                    NSLog("[Node] Download \(model.id) failed for \(model.download_url) sha256=\(model.sha256): \(error)")
                     NodeCoordinator.shared.doUpdateReadyModels()
                 }
             }

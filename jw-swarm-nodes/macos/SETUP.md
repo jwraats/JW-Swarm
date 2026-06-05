@@ -136,6 +136,7 @@ The macOS node now uses [llama.swift](https://github.com/mattt/llama.swift), whi
 - A compatibility symlink to `weights.bin` is still created.
 - Requests are executed with a greedy decode path and streamed as token chunks.
 - If a model file exceeds the configured memory limit, that model is excluded from `ready_models`.
+- Loaded models are kept within the configured memory budget; when switching models, the node unloads older residents as needed instead of keeping every model in memory.
 - The current macOS node expects llama.cpp-compatible local model files. Direct Hugging Face MLX repo execution is not implemented yet.
 
 ## Verify registration

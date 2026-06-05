@@ -4,6 +4,8 @@ import CommonCrypto
 final class ModelDownloader {
     static let shared = ModelDownloader()
     private let session = URLSession.shared
+    private let streamChunkSize = 64 * 1024
+    private let diskHeadroomBytes: UInt64 = 64 * 1024 * 1024
 
     func downloadModel(_ m: CatalogModel, progress: @escaping (Double) -> Void = { _ in }) async throws {
         let dir = ConfigManager.shared.modelDir().appendingPathComponent(m.id)
@@ -19,21 +21,57 @@ final class ModelDownloader {
         let remoteName = URL(string: m.download_url)?.lastPathComponent ?? "weights.bin"
         let filename = remoteName.isEmpty ? "weights.bin" : remoteName
         let dest = dir.appendingPathComponent(filename)
+        let partial = dir.appendingPathComponent("\(filename).partial")
+        try? FileManager.default.removeItem(at: partial)
+
+        try ensureSufficientDiskSpace(for: m.size_bytes, at: dir)
+
         log("downloading \(m.id) (\(m.size_bytes) bytes)")
         guard let url = URL(string: m.download_url) else { throw DLE.invalidURL }
-        let progressDelegate = DownloadProgressDelegate(onProgress: progress)
-        let (tu, resp) = try await session.download(from: url, delegate: progressDelegate)
+        let (bytes, resp) = try await session.bytes(from: url)
         guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
-            try? FileManager.default.removeItem(at: tu)
             throw DLE.http((resp as? HTTPURLResponse)?.statusCode ?? -1)
         }
-        let hash = try sha256(at: tu)
+
+        FileManager.default.createFile(atPath: partial.path, contents: nil)
+        let fileHandle = try FileHandle(forWritingTo: partial)
+        defer {
+            try? fileHandle.close()
+        }
+
+        var hasher = SHA256Hasher()
+        var writtenBytes: UInt64 = 0
+        var buffer = Data()
+        buffer.reserveCapacity(streamChunkSize)
+
+        do {
+            var iterator = bytes.makeAsyncIterator()
+            while let byte = try await iterator.next() {
+                buffer.append(byte)
+                if buffer.count >= streamChunkSize {
+                    try writeChunk(buffer, to: fileHandle, hasher: &hasher, writtenBytes: &writtenBytes)
+                    progressFraction(writtenBytes, totalBytes: m.size_bytes, progress: progress)
+                    buffer.removeAll(keepingCapacity: true)
+                }
+            }
+
+            if !buffer.isEmpty {
+                try writeChunk(buffer, to: fileHandle, hasher: &hasher, writtenBytes: &writtenBytes)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: partial)
+            throw error
+        }
+
+        progressFraction(writtenBytes, totalBytes: m.size_bytes, progress: progress)
+
+        let hash = hasher.finalize()
         guard hash.lowercased() == m.sha256.lowercased() else {
-            try? FileManager.default.removeItem(at: tu)
+            try? FileManager.default.removeItem(at: partial)
             throw DLE.mismatch(expected: m.sha256, actual: hash)
         }
         try? FileManager.default.removeItem(at: dest)
-        try FileManager.default.moveItem(at: tu, to: dest)
+        try FileManager.default.moveItem(at: partial, to: dest)
         if filename != "weights.bin" {
             let legacy = dir.appendingPathComponent("weights.bin")
             try? FileManager.default.removeItem(at: legacy)
@@ -44,38 +82,37 @@ final class ModelDownloader {
         log("\(m.id) verified")
     }
 
-    private func sha256(at url: URL) throws -> String {
-        let fh = try FileHandle(forReadingFrom: url)
-        var h = SHA256Hasher()
-        while true {
-            let chunk = try fh.read(upToCount: 8192)
-            guard let d = chunk, !d.isEmpty else { break }
-            h.update(data: d)
+    private func ensureSufficientDiskSpace(for expectedBytes: UInt64, at url: URL) throws {
+        guard let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+              let availableBytes = values.volumeAvailableCapacityForImportantUsage,
+              availableBytes > 0 else {
+            return
         }
-        return h.finalize()
+
+        let requiredBytes = expectedBytes + diskHeadroomBytes
+        if UInt64(availableBytes) < requiredBytes {
+            throw DLE.insufficientDiskSpace(requiredBytes: requiredBytes, availableBytes: UInt64(availableBytes))
+        }
+    }
+
+    private func writeChunk(
+        _ chunk: Data,
+        to fileHandle: FileHandle,
+        hasher: inout SHA256Hasher,
+        writtenBytes: inout UInt64
+    ) throws {
+        try fileHandle.write(contentsOf: chunk)
+        hasher.update(data: chunk)
+        writtenBytes += UInt64(chunk.count)
+    }
+
+    private func progressFraction(_ writtenBytes: UInt64, totalBytes: UInt64, progress: (Double) -> Void) {
+        guard totalBytes > 0 else { return }
+        progress(min(Double(writtenBytes) / Double(totalBytes), 1.0))
     }
 
     private func log(_ m: String) { NSLog("[Models] \(m)") }
 }
-
-/// Per-task delegate that reports download progress by observing the task's
-/// `Progress` object. Used with `URLSession.download(from:delegate:)` so the
-/// async API still returns the downloaded file URL.
-final class DownloadProgressDelegate: NSObject, URLSessionTaskDelegate {
-    private let onProgress: (Double) -> Void
-    private var observation: NSKeyValueObservation?
-
-    init(onProgress: @escaping (Double) -> Void) {
-        self.onProgress = onProgress
-    }
-
-    func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
-        observation = task.progress.observe(\.fractionCompleted) { [onProgress] progress, _ in
-            onProgress(progress.fractionCompleted)
-        }
-    }
-}
-
 
 struct SHA256Hasher {
     private var ctx = CC_SHA256_CTX()
@@ -93,12 +130,19 @@ struct SHA256Hasher {
 }
 
 enum DLE: Error, LocalizedError {
-    case invalidURL, http(Int), mismatch(expected: String, actual: String)
+    case invalidURL
+    case http(Int)
+    case mismatch(expected: String, actual: String)
+    case insufficientDiskSpace(requiredBytes: UInt64, availableBytes: UInt64)
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "Invalid URL"
         case .http(let c): return "HTTP \(c)"
         case .mismatch(let e, let a): return "sha256 mismatch \(e) != \(a)"
+        case .insufficientDiskSpace(let requiredBytes, let availableBytes):
+            let requiredGB = Double(requiredBytes) / 1_000_000_000
+            let availableGB = Double(availableBytes) / 1_000_000_000
+            return String(format: "insufficient disk space for download: need %.2f GB, have %.2f GB free", requiredGB, availableGB)
         }
     }
 }
