@@ -121,6 +121,10 @@ On first run, if the config file doesn't exist, the node auto-generates it:
 - Empty `selected_models` (= download all catalog models for this GPU vendor)
 - `fleet_url` from `JW_FLEET_URL` env var (default: `wss://localhost/node/connect`)
 
+> The backend enforces `memory_limit_mb`: a model whose downloaded artifact
+> exceeds the budget is never advertised as ready, and only one model is active
+> at a time (the node swaps models on demand).
+
 ### Environment variables
 
 | Variable        | Config key          | Purpose                                                    |

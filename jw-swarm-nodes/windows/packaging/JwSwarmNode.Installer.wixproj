@@ -1,0 +1,14 @@
+<Project Sdk="WixToolset.Sdk/5.0.0">
+
+  <PropertyGroup>
+    <OutputName>JwSwarmNode</OutputName>
+    <OutputType>Package</OutputType>
+    <!-- Path to the published tray app, produced by build-msi.ps1 -->
+    <DefineConstants>PublishDir=$(PublishDir)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.0" />
+  </ItemGroup>
+
+</Project>

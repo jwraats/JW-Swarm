@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>JwSwarmNode.App</RootNamespace>
+    <AssemblyName>JwSwarmNode</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.1.0</Version>
+    <!--
+      This head targets net8.0-windows (WinForms tray) and only builds on Windows.
+      The cross-platform node logic lives in JwSwarmNode.Core, which builds anywhere.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\JwSwarmNode.Core\JwSwarmNode.Core.csproj" />
+  </ItemGroup>
+
+</Project>
