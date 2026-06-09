@@ -2,8 +2,8 @@
 
 The Linux node is a Rust CLI (`jw-swarm-node`) that runs as a **systemd** service.
 It connects outbound to the Fleet Manager over WSS + mTLS, downloads and verifies
-catalog models, and serves inference through a stub backend (placeholder for
-real vLLM/llama.cpp integration).
+catalog models (GGUF), and serves real inference through an embedded
+**llama.cpp** backend (via the `llama-cpp-2` crate).
 
 ## Architecture
 
@@ -23,8 +23,9 @@ real vLLM/llama.cpp integration).
                                           │  │   sha256-verified)││
                                           │  └───────────────────┘│
                                           │                       │
-                                          │  ┌─── backend stub ─┐ │
-                                          │  │ (simulated tokens) │
+                                          │  ┌─ llama.cpp backend┐│
+                                          │  │ (real inference,  ││
+                                          │  │  LRU model cache) ││
                                           │  └──────────────────┘ │
                                           └──────────────────────┘
 ```
@@ -35,7 +36,9 @@ real vLLM/llama.cpp integration).
   - NVIDIA — CUDA drivers + `nvidia-smi` available on `$PATH`.
   - AMD — ROCm runtime available (detection via `rocminfo`).
 - Network egress to the Fleet Manager on port 443 (WSS).
-- To build from source: Rust toolchain (<https://rustup.rs>).
+- To build from source: Rust toolchain (<https://rustup.rs>), plus **cmake**
+  and a C/C++ toolchain (`build-essential`) — the `llama-cpp-2` crate compiles
+  llama.cpp from source during the build.
 
 ## 1. Install
 

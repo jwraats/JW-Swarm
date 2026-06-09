@@ -1,13 +1,28 @@
-use std::sync::Arc;
-use tokio::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use tokio::sync::{mpsc, watch};
 use tungstenite::protocol::Message as WsMessage;
 use tracing::{info, warn};
 use futures::{SinkExt, StreamExt};
+
+/// Interval between WebSocket keepalive pings, mirroring the macOS tunnel.
+const PING_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
 
 pub struct TunnelHandle {
     pub outbound: mpsc::UnboundedSender<String>,
     #[allow(dead_code)]
     pub shutdown: tokio_util::sync::CancellationToken,
+    /// Connection state notifications: `true` on connect, `false` on disconnect.
+    pub connected: watch::Receiver<bool>,
+    latency_ms: Arc<Mutex<Option<f64>>>,
+}
+
+impl TunnelHandle {
+    /// Round-trip latency (ms) of the most recent WebSocket ping, or `None`
+    /// when no successful ping has completed on the current connection.
+    pub fn latency_ms(&self) -> Option<f64> {
+        *self.latency_ms.lock().unwrap()
+    }
 }
 
 pub struct Tunnel {
@@ -20,6 +35,9 @@ impl Tunnel {
     pub fn run_loop(self) -> (TunnelHandle, mpsc::UnboundedReceiver<String>) {
         let (otx, mut orx) = mpsc::unbounded_channel::<String>();
         let (itx, irx) = mpsc::unbounded_channel::<String>();
+        let (ctx_tx, ctx_rx) = watch::channel(false);
+        let latency = Arc::new(Mutex::new(None::<f64>));
+        let latency_inner = latency.clone();
         let sh = tokio_util::sync::CancellationToken::new();
         let sh_inner = sh.clone();
 
@@ -64,6 +82,8 @@ impl Tunnel {
 
                 info!("tunnel connected");
                 backoff = std::time::Duration::from_secs(1);
+                *latency_inner.lock().unwrap() = None;
+                let _ = ctx_tx.send(true);
 
                 // Drain queued outbound messages
                 loop {
@@ -77,6 +97,11 @@ impl Tunnel {
                     }
                 }
 
+                // Keepalive ping bookkeeping: send a ping right away so latency
+                // is available shortly after connecting, then on the interval.
+                let mut ping_timer = tokio::time::interval(PING_INTERVAL);
+                let mut ping_sent_at: Option<Instant> = None;
+
                 // Main event loop
                 loop {
                     tokio::select! {
@@ -84,6 +109,13 @@ impl Tunnel {
                         _ = sh_inner.cancelled() => {
                             info!("shutdown");
                             break;
+                        }
+                        _ = ping_timer.tick() => {
+                            ping_sent_at = Some(Instant::now());
+                            if ws.send(WsMessage::Ping(Vec::new().into())).await.is_err() {
+                                warn!("ping failed, reconnecting");
+                                break;
+                            }
                         }
                         outgoing = orx.recv() => {
                             match outgoing {
@@ -104,6 +136,12 @@ impl Tunnel {
                                 Some(Ok(WsMessage::Ping(p))) => {
                                     let _ = ws.send(WsMessage::Pong(p)).await;
                                 }
+                                Some(Ok(WsMessage::Pong(_))) => {
+                                    if let Some(sent) = ping_sent_at.take() {
+                                        let rtt = sent.elapsed().as_secs_f64() * 1000.0;
+                                        *latency_inner.lock().unwrap() = Some(rtt);
+                                    }
+                                }
                                 Some(Ok(_)) => {}
                                 Some(Err(e)) => {
                                     warn!("read error: {}", e);
@@ -115,6 +153,8 @@ impl Tunnel {
                     }
                 }
 
+                let _ = ctx_tx.send(false);
+                *latency_inner.lock().unwrap() = None;
                 warn!("disconnected, retry in {:?}", backoff);
                 backoff = std::cmp::min(backoff * 2, std::time::Duration::from_secs(60));
                 tokio::select! {
@@ -124,7 +164,15 @@ impl Tunnel {
             }
         });
 
-        (TunnelHandle { outbound: otx, shutdown: sh }, irx)
+        (
+            TunnelHandle {
+                outbound: otx,
+                shutdown: sh,
+                connected: ctx_rx,
+                latency_ms: latency,
+            },
+            irx,
+        )
     }
 }
 
