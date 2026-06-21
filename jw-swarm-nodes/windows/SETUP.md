@@ -2,8 +2,9 @@
 
 The Windows node is a **system-tray app** written in C# / .NET 8. It connects
 outbound to the Fleet Manager over **WSS + mTLS**, downloads and verifies model
-artifacts, and serves inference. It runs models with **vLLM (CUDA)** on NVIDIA
-GPUs or **llama.cpp (ROCm)** on AMD GPUs. See the [nodes overview](../README.md)
+artifacts (GGUF), and serves real inference through an embedded **llama.cpp**
+backend ([LLamaSharp](https://github.com/SciSharp/LLamaSharp) with the CPU
+backend package). See the [nodes overview](../README.md)
 and the top-level [DESIGN](../../DESIGN.md).
 
 > Status: Phase 5 (P5) in [DESIGN.md](../../DESIGN.md#11-implementation-phases).
@@ -33,9 +34,9 @@ Linux and macOS nodes.
 ## Prerequisites
 
 - Windows 11.
-- A supported GPU:
-  - **NVIDIA** — recent driver + CUDA; a vLLM install.
-  - **AMD** — ROCm on Windows; a llama.cpp ROCm build.
+- Inference runs on CPU via the bundled `LLamaSharp.Backend.Cpu` native
+  binaries; for GPU acceleration swap in `LLamaSharp.Backend.Cuda12` (NVIDIA)
+  or a ROCm/Vulkan backend package.
 - .NET 8 SDK to build from source.
 - WiX Toolset v5 (`dotnet tool install --global wix`) to build the MSI.
 - Network egress to the Fleet Manager host on port 443.

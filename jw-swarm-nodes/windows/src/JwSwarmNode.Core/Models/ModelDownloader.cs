@@ -30,8 +30,11 @@ public sealed class ModelDownloader
 
     /// <summary>
     /// Ensures the model identified by <paramref name="model"/> is present and
-    /// verified under <paramref name="modelRoot"/>/&lt;id&gt;/weights.bin.
-    /// Returns the directory holding the verified artifact.
+    /// verified under <paramref name="modelRoot"/>/&lt;id&gt;/. The remote
+    /// filename is preserved (falling back to <c>weights.bin</c>), and a
+    /// <c>sha256</c> marker file records the verified digest so subsequent
+    /// catalog passes can skip re-hashing. Returns the directory holding the
+    /// verified artifact.
     /// </summary>
     public async Task<string> DownloadModelAsync(
         CatalogModel model, string modelRoot, CancellationToken ct = default)
@@ -39,15 +42,26 @@ public sealed class ModelDownloader
         var dir = Path.Combine(modelRoot, model.Id);
         Directory.CreateDirectory(dir);
 
-        var finalPath = Path.Combine(dir, "weights.bin");
+        var fileName = RemoteFileName(model.DownloadUrl) ?? "weights.bin";
+        var finalPath = Path.Combine(dir, fileName);
+        var markerPath = Path.Combine(dir, "sha256");
+
+        // Fast path: marker matches the expected digest and the artifact exists.
+        if (File.Exists(finalPath) && MarkerMatches(markerPath, model.Sha256))
+        {
+            return dir;
+        }
+
+        // Slow path: artifact exists but no/old marker; re-verify once and record.
         if (File.Exists(finalPath) && await VerifyAsync(finalPath, model.Sha256, ct))
         {
+            WriteMarker(markerPath, model.Sha256);
             return dir;
         }
 
         EnsureDiskSpace(dir, (long)model.SizeBytes);
 
-        var partial = Path.Combine(dir, "weights.bin.partial");
+        var partial = finalPath + ".partial";
         if (File.Exists(partial)) File.Delete(partial);
 
         try
@@ -63,6 +77,7 @@ public sealed class ModelDownloader
 
             if (File.Exists(finalPath)) File.Delete(finalPath);
             File.Move(partial, finalPath);
+            WriteMarker(markerPath, model.Sha256);
             return dir;
         }
         catch
@@ -70,6 +85,45 @@ public sealed class ModelDownloader
             if (File.Exists(partial)) File.Delete(partial);
             throw;
         }
+    }
+
+    /// <summary>Last path segment of the download URL, if usable as a filename.</summary>
+    internal static string? RemoteFileName(string url)
+    {
+        try
+        {
+            var uri = new Uri(url);
+            var name = Path.GetFileName(uri.AbsolutePath);
+            if (string.IsNullOrWhiteSpace(name)) return null;
+            name = Uri.UnescapeDataString(name);
+            if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return null;
+            return name;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static bool MarkerMatches(string markerPath, string expectedSha256)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(expectedSha256) || !File.Exists(markerPath)) return false;
+            var recorded = File.ReadAllText(markerPath).Trim();
+            return string.Equals(
+                recorded, expectedSha256.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static void WriteMarker(string markerPath, string sha256)
+    {
+        try { File.WriteAllText(markerPath, sha256.Trim().ToLowerInvariant()); }
+        catch (Exception) { /* marker is an optimization only */ }
     }
 
     private async Task StreamToFileAsync(
